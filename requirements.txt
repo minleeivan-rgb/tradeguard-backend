@@ -3,3 +3,8 @@ uvicorn
 motor
 pydantic
 python-dotenv
+yfinance
+pandas
+httpx
+lxml
+python-jose[cryptography]
