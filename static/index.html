@@ -483,7 +483,9 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
 <script>
 let USER_ID = null;
 let AUTH_TOKEN = null;
-let API_BASE = 'http://localhost:8000';
+let API_BASE = window.location.hostname === 'localhost' 
+  ? 'http://localhost:8000' 
+  : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
 const tabIds = ['dashboard','scan','review','history','journal','settings'];
 
