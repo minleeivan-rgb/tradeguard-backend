@@ -61,8 +61,9 @@ async def callback(code: str = None, error: str = None):
 
         # 把 token 傳回前端
         import urllib.parse
+        base_url = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback").replace("/auth/callback", "")
         user_data = urllib.parse.quote(f'{{"email":"{email}","name":"{name}","picture":"{picture}"}}')
-        return RedirectResponse(f'http://localhost:8000/?token={jwt_token}&user={user_data}')
+        return RedirectResponse(f'{base_url}/?token={jwt_token}&user={user_data}')
 
     except Exception as e:
         return HTMLResponse(f"<script>window.location='/?error={str(e)}'</script>")
