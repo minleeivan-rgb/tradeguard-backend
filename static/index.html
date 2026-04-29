@@ -707,7 +707,8 @@ async function loadReviewRules() {
 // ==================== API ====================
 
 async function checkApi() {
-  API_BASE = document.getElementById('apiUrl')?.value || 'http://localhost:8000';
+  const inputUrl = document.getElementById('apiUrl');
+  if(inputUrl) inputUrl.value = API_BASE;
   const dot = document.getElementById('statusDot');
   const txt = document.getElementById('statusText');
   try {
