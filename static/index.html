@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeGuard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f0;min-height:100vh;display:flex;justify-content:center;padding:20px}
+/* 登入頁 */
+#loginPage{display:none;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;width:100%;max-width:400px}
+.login-card{background:#fff;border-radius:20px;border:1px solid #e8e8e4;padding:40px 32px;text-align:center;width:100%}
+.login-logo{font-size:28px;font-weight:800;color:#1a1a1a;letter-spacing:-0.05em;margin-bottom:8px}
+.login-logo span{color:#1a7a52}
+.login-sub{font-size:14px;color:#aaa;margin-bottom:32px}
+.login-features{text-align:left;margin-bottom:28px}
+.login-feature{display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;color:#666;border-bottom:1px solid #f5f5f0}
+.login-feature:last-child{border:none}
+.lf-icon{width:28px;height:28px;border-radius:8px;background:#e8f5ee;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.btn-google{width:100%;padding:14px;background:#fff;border:1.5px solid #e8e8e4;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;transition:all 0.15s;color:#1a1a1a}
+.btn-google:hover{background:#f8f8f5;border-color:#ccc}
+.btn-google img{width:20px;height:20px}
+/* 主 APP */
+.app{display:none;width:100%;max-width:700px}
+.topbar{background:#fff;border-radius:16px;padding:14px 20px 0;border:1px solid #e8e8e4;margin-bottom:12px}
+.topbar-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.logo{font-size:16px;font-weight:700;color:#1a1a1a;letter-spacing:-0.03em}
+.logo span{color:#1a7a52}
+.live{display:flex;align-items:center;gap:5px;font-size:12px;color:#1a7a52;font-weight:500;cursor:pointer}
+.pulse{width:7px;height:7px;border-radius:50%;background:#1a7a52;animation:pulse 2s infinite}
+.pulse.red{background:#d63b3b}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+.tabs{display:flex;gap:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tabs::-webkit-scrollbar{display:none}
+.tab{padding:10px 14px;font-size:13px;font-weight:500;color:#888;border:none;background:transparent;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0;transition:all 0.15s}
+.tab.active{color:#1a7a52;border-bottom-color:#1a7a52}
+.body{padding:4px 0}
+.section{display:none}.section.active{display:block}
+.card{background:#fff;border-radius:14px;border:1px solid #e8e8e4;padding:16px 18px;margin-bottom:10px}
+.card-title{font-size:10px;font-weight:700;letter-spacing:0.08em;color:#aaa;text-transform:uppercase;margin-bottom:14px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.sc{background:#f8f8f5;border-radius:12px;padding:14px 16px;border:1px solid #e8e8e4}
+.sc-label{font-size:11px;color:#888;margin-bottom:6px}
+.sc-val{font-size:22px;font-weight:700;color:#1a1a1a;letter-spacing:-0.03em}
+.sc-val.g{color:#1a7a52}.sc-val.r{color:#d63b3b}
+.sc-sub{font-size:11px;color:#aaa;margin-top:3px}
+.alert-c{border-left:3px solid #d63b3b;padding:12px 14px;border-radius:0 12px 12px 0;background:#fff;margin-bottom:8px;border-top:1px solid #e8e8e4;border-right:1px solid #e8e8e4;border-bottom:1px solid #e8e8e4}
+.alert-c.warn{border-left-color:#c97c0a}
+.at{font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:2px}
+.ad{font-size:12px;color:#666}
+.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.badge.r{background:#fdeaea;color:#d63b3b}.badge.a{background:#fef3e2;color:#c97c0a}
+.badge.g{background:#e8f5ee;color:#1a7a52}.badge.b{background:#e8f0fe;color:#2563eb}
+/* 持倉卡片 */
+.holding-card{background:#fff;border-radius:14px;border:1px solid #e8e8e4;padding:14px 16px;margin-bottom:10px}
+.holding-card.alert-border{border-left:3px solid #d63b3b}
+.holding-card.warn-border{border-left:3px solid #c97c0a}
+.holding-top{display:flex;align-items:flex-start;margin-bottom:12px}
+.sicon{width:36px;height:36px;border-radius:10px;background:#f5f5f0;border:1px solid #e8e8e4;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#888;margin-right:12px;flex-shrink:0}
+.sname{font-size:14px;font-weight:700;color:#1a1a1a}
+.ssub{font-size:11px;color:#aaa;margin-top:2px}
+.sstory{font-size:11px;color:#888;margin-top:3px;line-height:1.4}
+.sright{text-align:right;margin-left:auto;flex-shrink:0}
+.pnl{font-size:16px;font-weight:700}
+.pnl.up{color:#1a7a52}.pnl.dn{color:#d63b3b}
+.pnl-sub{font-size:11px;color:#aaa;margin-top:2px}
+/* 進度條區 */
+.bar-section{margin-bottom:10px}
+.bar-row{margin-bottom:8px}
+.bar-labels{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.bar-label{font-size:11px;color:#888;font-weight:500}
+.bar-val{font-size:11px;font-weight:700}
+.bar-track{background:#f0f0ec;border-radius:20px;height:6px;overflow:hidden}
+.bar-fill{height:6px;border-radius:20px;transition:width 0.4s}
+.bar-fill.green{background:#1a7a52}
+.bar-fill.amber{background:#c97c0a}
+.bar-fill.red{background:#d63b3b}
+/* 筆記 */
+.note-section{border-top:1px solid #f0f0ec;padding-top:10px}
+.note-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.note-label{font-size:11px;font-weight:600;color:#888}
+.note-edit-btn{font-size:11px;color:#1a7a52;cursor:pointer;background:none;border:none;font-weight:600;padding:0}
+.note-text{font-size:12px;color:#666;line-height:1.5}
+.note-input{width:100%;font-size:12px;color:#1a1a1a;background:#f8f8f5;border:1px solid #e8e8e4;border-radius:8px;padding:8px 10px;resize:none;outline:none;font-family:inherit}
+.note-input:focus{border-color:#1a7a52}
+.note-actions{display:flex;gap:6px;margin-top:6px}
+.note-save{padding:6px 14px;background:#1a7a52;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
+.note-cancel{padding:6px 14px;background:#f5f5f0;color:#888;border:1px solid #e8e8e4;border-radius:8px;font-size:12px;cursor:pointer}
+/* MA 資訊 */
+.ma-row{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.ma-pill{font-size:11px;padding:3px 8px;border-radius:6px;font-weight:600}
+.ma-pill.above{background:#e8f5ee;color:#1a7a52}
+.ma-pill.below{background:#fdeaea;color:#d63b3b}
+.ma-pill.near{background:#fef3e2;color:#c97c0a}
+/* Scan */
+.mkt-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.mkt-box{background:#fff;border-radius:12px;padding:12px 14px;border:1px solid #e8e8e4}
+.mkt-label{font-size:10px;color:#aaa;margin-bottom:5px;font-weight:500}
+.mkt-val{font-size:14px;font-weight:600;color:#1a1a1a}
+.mkt-val.g{color:#1a7a52}
+.sector-item{padding:14px 0;border-bottom:1px solid #f0f0ec}
+.sector-item:last-child{border-bottom:none}
+.sector-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sector-name{font-size:14px;font-weight:600;color:#1a1a1a}
+.sector-pct{font-size:16px;font-weight:700;letter-spacing:-0.02em}
+.sector-meta{font-size:11px;color:#aaa;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{background:#f8f8f5;border:1px solid #e8e8e4;border-radius:8px;padding:4px 10px;font-size:11px}
+.chip-code{font-weight:600;color:#1a1a1a}
+.chip-pct{color:#1a7a52;margin-left:4px}.chip-pct.r{color:#d63b3b}
+.hotzone{background:#fffbf0;border:1px solid #f5d48c;border-radius:10px;padding:8px 12px;margin-top:8px;font-size:11px;color:#9a6200}
+/* Review */
+.r-tabs{display:flex;gap:8px;margin-bottom:14px}
+.r-tab{flex:1;padding:9px;text-align:center;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid #e8e8e4;color:#888;background:#fff;transition:all 0.15s}
+.r-tab.active{border-color:#1a7a52;color:#1a7a52;background:#e8f5ee}
+.field{margin-bottom:12px}
+.field-label{font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:6px}
+textarea,input[type=text],input[type=number],select{width:100%;font-family:inherit;font-size:13px;color:#1a1a1a;background:#f8f8f5;border:1px solid #e8e8e4;border-radius:10px;padding:10px 12px;resize:none;outline:none;transition:border-color 0.15s}
+textarea:focus,input:focus,select:focus{border-color:#1a7a52;background:#fff}
+.btn-main{width:100%;padding:13px;background:#1a7a52;color:#fff;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;transition:opacity 0.15s}
+.btn-main:hover{opacity:0.88}
+.btn-main:disabled{opacity:0.45;cursor:not-allowed}
+.btn-sec{width:100%;padding:11px;background:#fff;color:#1a7a52;border:1.5px solid #1a7a52;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px}
+.btn-sec:hover{background:#e8f5ee}
+.ai-box{background:#f8f8f5;border-radius:12px;padding:14px 16px;margin-top:10px}
+.ai-label{font-size:10px;font-weight:700;letter-spacing:0.08em;color:#1a7a52;margin-bottom:10px;text-transform:uppercase;display:flex;align-items:center;gap:6px}
+.ai-text{font-size:13px;color:#1a1a1a;line-height:1.75;white-space:pre-wrap;word-break:break-word}
+.verdict{display:flex;align-items:center;gap:8px;padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;margin-top:12px}
+.verdict.pass{background:#e8f5ee;color:#1a7a52}
+.verdict.fail{background:#fdeaea;color:#d63b3b}
+.verdict.hold{background:#fffbf0;color:#c97c0a}
+/* Review History */
+.review-item{padding:14px 0;border-bottom:1px solid #f0f0ec}
+.review-item:last-child{border-bottom:none}
+.review-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.review-ticker{font-size:14px;font-weight:700;color:#1a1a1a}
+.review-date{font-size:11px;color:#aaa}
+.review-type{font-size:11px;color:#888;margin-bottom:6px}
+.review-snippet{font-size:12px;color:#666;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.review-expand{font-size:11px;color:#1a7a52;cursor:pointer;background:none;border:none;font-weight:600;margin-top:4px;padding:0}
+/* Journal */
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.stat-box{background:#f8f8f5;border-radius:12px;padding:12px 14px;border:1px solid #e8e8e4}
+.stat-label{font-size:10px;color:#aaa;margin-bottom:5px}
+.stat-val{font-size:18px;font-weight:700;color:#1a1a1a}
+.stat-val.g{color:#1a7a52}.stat-val.r{color:#d63b3b}
+.log-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f0f0ec}
+.log-item:last-child{border-bottom:none}
+.ldot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.ldot.g{background:#1a7a52}.ldot.r{background:#d63b3b}.ldot.a{background:#c97c0a}
+/* Settings */
+.range-row{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+input[type=range]{flex:1;accent-color:#1a7a52}
+.rval{font-size:14px;font-weight:700;color:#1a7a52;min-width:42px}
+label{font-size:13px;color:#1a1a1a;display:flex;align-items:center;gap:6px;cursor:pointer}
+input[type=checkbox]{accent-color:#1a7a52;width:15px;height:15px}
+hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
+/* Misc */
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid #c8e6d9;border-top-color:#1a7a52;border-radius:50%;animation:spin 0.7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cursor{display:inline-block;width:2px;height:14px;background:#1a7a52;margin-left:1px;animation:blink 0.8s infinite;vertical-align:text-bottom}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.loading{text-align:center;padding:32px;color:#aaa;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px}
+.empty{text-align:center;padding:32px;color:#aaa;font-size:13px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:16px;padding:20px;width:90%;max-width:480px;max-height:85vh;overflow-y:auto}
+.modal-title{font-size:15px;font-weight:700;margin-bottom:16px}
+</style>
+</head>
+<body>
+
+<!-- 登入頁 -->
+<div id="loginPage">
+  <div class="login-card">
+    <div class="login-logo">Trade<span>Guard</span></div>
+    <div class="login-sub">你的交易紀律 AI 夥伴</div>
+    <div class="login-features">
+      <div class="login-feature"><div class="lf-icon">📊</div><span>AI 審核每一筆買賣，強迫你說服自己才能進場</span></div>
+      <div class="login-feature"><div class="lf-icon">🔍</div><span>每日掃描 1700+ 台股，找出強勢族群</span></div>
+      <div class="login-feature"><div class="lf-icon">🛡️</div><span>停利停損自動警示，保護你的獲利</span></div>
+      <div class="login-feature"><div class="lf-icon">📝</div><span>自訂交易規則，AI 幫你嚴格執行</span></div>
+    </div>
+    <button class="btn-google" onclick="googleLogin()">
+      <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.29-8.16 2.29-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+      使用 Google 帳號登入
+    </button>
+  </div>
+</div>
+
+<!-- 主 APP -->
+<div class="app" id="mainApp">
+  <div class="topbar">
+    <div class="topbar-row">
+      <div class="logo">Trade<span>Guard</span></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <img id="userAvatar" src="" style="width:26px;height:26px;border-radius:50%;display:none;border:1.5px solid #e8e8e4">
+          <span id="userName" style="font-size:12px;color:#666;font-weight:500"></span>
+          <button onclick="logout()" style="font-size:11px;color:#aaa;background:none;border:none;cursor:pointer;padding:2px 4px">登出</button>
+        </div>
+        <div class="live" id="apiStatus" onclick="checkApi()">
+          <span class="pulse" id="statusDot"></span>
+          <span id="statusText">連線中...</span>
+        </div>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="go('dashboard')">持倉</button>
+      <button class="tab" onclick="go('scan')">每日掃描</button>
+      <button class="tab" onclick="go('review')">交易審核</button>
+      <button class="tab" onclick="go('history')">審核歷史</button>
+      <button class="tab" onclick="go('journal')">日誌</button>
+      <button class="tab" onclick="go('settings')">設定</button>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" class="section active">
+      <div class="summary-grid">
+        <div class="sc">
+          <div class="sc-label">台股持倉（TWD）</div>
+          <div class="sc-val" id="twdValue">—</div>
+          <div class="sc-sub" id="twdPnl">損益 —</div>
+        </div>
+        <div class="sc">
+          <div class="sc-label">美股持倉（USD）</div>
+          <div class="sc-val" id="usdValue">—</div>
+          <div class="sc-sub" id="usdPnl">損益 —</div>
+        </div>
+      </div>
+      <div id="alertsArea"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="card-title" style="margin-bottom:0">持倉明細</div>
+        <div style="display:flex;gap:6px">
+          <button onclick="loadDashboard(true)" style="font-size:11px;padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#fff;cursor:pointer;color:#1a7a52;font-weight:600">更新股價</button>
+          <button onclick="openAddHolding()" style="font-size:11px;padding:5px 10px;border-radius:8px;border:1px solid #1a7a52;background:#1a7a52;cursor:pointer;color:#fff;font-weight:600">+ 新增</button>
+        </div>
+      </div>
+      <div id="holdingsList"><div class="loading"><span class="spinner"></span>載入持倉中...</div></div>
+    </div>
+
+    <!-- SCAN -->
+    <div id="scan" class="section">
+      <button class="btn-main" onclick="loadScan()" style="margin-bottom:12px">執行今日掃描</button>
+      <div id="scanResult"><div class="empty">點擊上方按鈕執行掃描</div></div>
+    </div>
+
+    <!-- REVIEW -->
+    <div id="review" class="section">
+      <div class="r-tabs">
+        <button class="r-tab active" id="rBuy" onclick="swR('buy')">買進申請</button>
+        <button class="r-tab" id="rSell" onclick="swR('sell')">賣出申請</button>
+      </div>
+      <div id="buyForm">
+        <div class="card">
+          <div class="card-title">買進申請單</div>
+
+          <div class="field">
+            <div class="field-label">搜尋股票（輸入名稱或代號）</div>
+            <div style="display:flex;gap:8px">
+              <div style="flex:1;position:relative">
+                <input type="text" id="b-search" placeholder="例：台積電 / 2330 / NVDA" oninput="searchReviewStock(this.value)" autocomplete="off">
+                <div id="b-searchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e8e4;border-radius:10px;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto"></div>
+              </div>
+              <select id="b-market" style="width:80px"><option value="tw">台股</option><option value="us">美股</option></select>
+            </div>
+            <input type="hidden" id="b-ticker">
+            <div id="b-selectedStock" style="display:none;background:#e8f5ee;border-radius:8px;padding:6px 12px;margin-top:6px;font-size:13px;color:#1a7a52;font-weight:600"></div>
+          </div>
+
+          <button onclick="fetchAnalysis()" style="width:100%;padding:10px;background:#f8f8f5;color:#1a7a52;border:1.5px solid #1a7a52;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px">📊 分析技術面 →</button>
+          <div id="analysisBox" style="display:none"></div>
+
+          <div class="field">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <div class="field-label" style="margin-bottom:0">勾選這次要遵守的規則</div>
+              <button onclick="loadReviewRules()" style="font-size:11px;color:#1a7a52;background:none;border:none;cursor:pointer">重新載入</button>
+            </div>
+            <div id="reviewRulesArea"><div style="font-size:12px;color:#aaa;text-align:center;padding:12px"><span class="spinner"></span> 載入中...</div></div>
+            <div style="font-size:11px;color:#aaa;margin-top:8px">⚠ 勾選的規則 AI 逐條核查，有衝突 → 審慎評估，不達標 → 直接不通過</div>
+          </div>
+
+          <div class="field">
+            <div class="field-label">你看到的故事是什麼？</div>
+            <textarea id="b-story" rows="3" placeholder="例：AI 晶片需求爆發，CoWoS 為唯一供應商，法說會剛上調財測..."></textarea>
+          </div>
+
+          <button class="btn-main" id="buyBtn" onclick="doReview('buy')">送出 AI 審核</button>
+        </div>
+        <div id="buyRes"></div>
+      </div>
+
+      <div id="sellForm" style="display:none">
+        <div class="card">
+          <div class="card-title">賣出申請單</div>
+          <div class="field"><div class="field-label">要賣哪一支？</div><select id="s-ticker"></select></div>
+          <div class="field">
+            <div class="field-label">賣出理由</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+              <button onclick="setSellReason('已觸發停利條件：高點回檔超過 20%')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">停利觸發</button>
+              <button onclick="setSellReason('已觸發停損條件：跌破季線')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">跌破季線</button>
+              <button onclick="setSellReason('已觸發停損條件：跌破月線')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">跌破月線</button>
+              <button onclick="setSellReason('虧損已達 7%，執行停損')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">停損 7%</button>
+              <button onclick="setSellReason('題材結束，基本面改變')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">題材結束</button>
+              <button onclick="setSellReason('看到以下消息感到擔憂，想評估是否出場：')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">看到消息</button>
+            </div>
+            <textarea id="s-reason" rows="3" placeholder="選擇上方選項或自己輸入..."></textarea>
+          </div>
+          <button class="btn-main" id="sellBtn" onclick="doReview('sell')">送出 AI 審核</button>
+        </div>
+        <div id="sellRes"></div>
+      </div>
+    </div>
+
+    <!-- REVIEW HISTORY -->
+    <div id="history" class="section">
+      <div class="card-title" style="padding:4px 0 8px">所有審核紀錄</div>
+      <div id="historyList"><div class="loading"><span class="spinner"></span>載入中...</div></div>
+    </div>
+
+    <!-- JOURNAL -->
+    <div id="journal" class="section">
+      <div class="stat-row">
+        <div class="stat-box"><div class="stat-label">總交易次數</div><div class="stat-val" id="s-total">—</div></div>
+        <div class="stat-box"><div class="stat-label">勝率</div><div class="stat-val g" id="s-winrate">—</div></div>
+        <div class="stat-box"><div class="stat-label">平均獲利</div><div class="stat-val g" id="s-profit">—</div></div>
+        <div class="stat-box"><div class="stat-label">平均虧損</div><div class="stat-val r" id="s-loss">—</div></div>
+      </div>
+      <div class="card" style="padding:4px 18px" id="tradesList">
+        <div class="loading"><span class="spinner"></span>載入交易紀錄中...</div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="settings" class="section">
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:14px">停利 / 停損規則</div>
+        <div style="font-size:12px;color:#888;margin-bottom:8px">停利：高點回檔觸發點</div>
+        <div class="range-row"><input type="range" min="5" max="40" value="20" id="profitSlider" oninput="document.getElementById('pv').textContent=this.value+'%'"><span class="rval" id="pv">20%</span></div>
+        <div style="font-size:12px;color:#888;margin:12px 0 8px">停損：最大虧損容忍</div>
+        <div class="range-row"><input type="range" min="3" max="20" value="7" id="lossSlider" oninput="document.getElementById('lv').textContent=this.value+'%'"><span class="rval" id="lv">7%</span></div>
+        <hr>
+        <div style="font-size:12px;color:#888;margin-bottom:10px">均線停損條件</div>
+        <div style="display:flex;gap:16px"><label><input type="checkbox" id="maMonthly" checked> 跌破月線</label><label><input type="checkbox" id="maQuarterly" checked> 跌破季線</label></div>
+        <button class="btn-main" onclick="saveRules()" style="margin-top:14px">儲存規則</button>
+      </div>
+
+      <!-- 自訂規則 -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:14px;font-weight:700">我的交易規則</div>
+          <button onclick="openAddRule()" style="padding:6px 12px;background:#1a7a52;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ 新增規則</button>
+        </div>
+        <div style="font-size:12px;color:#aaa;margin-bottom:14px">這些規則會出現在「交易審核」讓你勾選，AI 會逐條核查</div>
+
+        <!-- 四個分類分開顯示 -->
+        <div id="rules-entry" style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:#2563eb;letter-spacing:0.06em;margin-bottom:8px">📈 進場條件</div>
+          <div id="rules-entry-list"></div>
+        </div>
+        <div id="rules-stoploss" style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:#d63b3b;letter-spacing:0.06em;margin-bottom:8px">🛑 停損條件</div>
+          <div id="rules-stoploss-list"></div>
+        </div>
+        <div id="rules-takeprofit" style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:#1a7a52;letter-spacing:0.06em;margin-bottom:8px">💰 停利條件</div>
+          <div id="rules-takeprofit-list"></div>
+        </div>
+        <div id="rules-mindset" style="margin-bottom:4px">
+          <div style="font-size:11px;font-weight:700;color:#c97c0a;letter-spacing:0.06em;margin-bottom:8px">🧠 心理與紀律</div>
+          <div id="rules-mindset-list"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px">後端連線</div>
+        <div class="field-label" style="margin-bottom:6px">API Base URL</div>
+        <input type="text" id="apiUrl" value="http://localhost:8000">
+        <button class="btn-sec" onclick="checkApi()">測試連線</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 自訂規則 Modal -->
+<div class="modal-overlay" id="ruleModal">
+  <div class="modal">
+    <div class="modal-title" id="ruleModalTitle">新增交易規則</div>
+    <input type="hidden" id="r-id">
+    <div class="field">
+      <div class="field-label">規則分類</div>
+      <select id="r-category">
+        <option value="entry">📈 進場條件</option>
+        <option value="stoploss">🛑 停損條件</option>
+        <option value="takeprofit">💰 停利條件</option>
+        <option value="mindset">🧠 心理與紀律</option>
+      </select>
+    </div>
+    <div class="field">
+      <div class="field-label">規則標題（簡短好記）</div>
+      <input type="text" id="r-title" placeholder="例：被洗出強勢股後的處理">
+    </div>
+    <div class="field">
+      <div class="field-label">規則內容（越詳細越好，AI 會完整讀取）</div>
+      <textarea id="r-content" rows="6" placeholder="例：被洗出去的強勢股，不要當天追高。等它回測起漲點或10日線，回測時成交量要萎縮（最好是當天量能一半以下），在支撐位橫盤2-3天不破再分批買回。"></textarea>
+    </div>
+    <button class="btn-main" onclick="saveCustomRule()">儲存規則</button>
+    <button class="btn-sec" onclick="closeRuleModal()">取消</button>
+  </div>
+</div>
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-title">新增持倉</div>
+
+    <div class="field">
+      <div class="field-label">市場</div>
+      <div style="display:flex;gap:8px">
+        <button id="mktTW" onclick="setMarket('tw')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid #1a7a52;background:#e8f5ee;color:#1a7a52;font-weight:700;cursor:pointer;font-size:13px">🇹🇼 台股</button>
+        <button id="mktUS" onclick="setMarket('us')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid #e8e8e4;background:#fff;color:#888;font-weight:600;cursor:pointer;font-size:13px">🇺🇸 美股</button>
+      </div>
+      <input type="hidden" id="m-market" value="tw">
+    </div>
+
+    <div class="field">
+      <div class="field-label">股票搜尋（輸入代號或中文名稱）</div>
+      <input type="text" id="m-search" placeholder="例：國巨 / 2327 / NVDA" oninput="searchStock(this.value)" autocomplete="off">
+      <div id="searchDropdown" style="display:none;background:#fff;border:1px solid #e8e8e4;border-radius:10px;margin-top:4px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08)"></div>
+      <input type="hidden" id="m-ticker">
+      <input type="hidden" id="m-name">
+      <div id="selectedStock" style="display:none;background:#e8f5ee;border-radius:8px;padding:8px 12px;margin-top:6px;font-size:13px;color:#1a7a52;font-weight:600"></div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">進場價格（元）</div>
+      <input type="number" id="m-entry" placeholder="例：290">
+    </div>
+
+    <div class="field">
+      <div class="field-label" id="sharesLabel">買進張數（台股 1張=1000股）</div>
+      <input type="number" id="m-shares" placeholder="例：3">
+    </div>
+
+    <div class="field">
+      <div class="field-label">進場日期</div>
+      <input type="text" id="m-date">
+    </div>
+
+    <div class="field">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="field-label" style="margin-bottom:0">融資買進？</div>
+        <label style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="m-margin" onchange="toggleMargin(this.checked)">
+          <span style="font-size:13px">是，融資買進</span>
+        </label>
+      </div>
+      <div id="marginDetail" style="display:none;background:#fff8ec;border-radius:10px;padding:10px 12px;border:1px solid #f5d48c">
+        <div style="font-size:12px;color:#9a6200;margin-bottom:8px">融資成數（自備款比例）</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="setMarginRatio(0.4)" id="mr40" style="flex:1;padding:6px;border-radius:8px;border:1px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer">四成自備<br><span style="font-weight:700">融六成</span></button>
+          <button onclick="setMarginRatio(0.5)" id="mr50" style="flex:1;padding:6px;border-radius:8px;border:1px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer">五成自備<br><span style="font-weight:700">融五成</span></button>
+          <button onclick="setMarginRatio(0.6)" id="mr60" style="flex:1;padding:6px;border-radius:8px;border:1px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer">六成自備<br><span style="font-weight:700">融四成</span></button>
+        </div>
+        <input type="hidden" id="m-margin-ratio" value="0.6">
+        <div id="marginCalc" style="font-size:12px;color:#9a6200;margin-top:8px;text-align:center"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">進場故事</div>
+      <textarea id="m-story" rows="2" placeholder="例：AI 晶片需求爆發..."></textarea>
+    </div>
+
+    <button class="btn-main" onclick="addHolding()">新增持倉</button>
+    <button class="btn-sec" onclick="closeModal()">取消</button>
+  </div>
+</div>
+
+<script>
+let USER_ID = null;
+let AUTH_TOKEN = null;
+let API_BASE = 'http://localhost:8000';
+let PROFIT_PCT = 20, LOSS_PCT = 7;
+const tabIds = ['dashboard','scan','review','history','journal','settings'];
+
+// ==================== 規則常數 ====================
+const CAT_CONFIG = {
+  entry:      {label:'📈 進場條件',   color:'#2563eb'},
+  stoploss:   {label:'🛑 停損條件',   color:'#d63b3b'},
+  takeprofit: {label:'💰 停利條件',   color:'#1a7a52'},
+  mindset:    {label:'🧠 心理與紀律', color:'#c97c0a'},
+};
+
+const DEFAULT_RULES = {
+  entry: [
+    {title:"站上月線才進場", content:"股價必須站穩在20日均線之上才考慮買進，跌破月線不進場"},
+    {title:"成交量放大確認", content:"買進當天或近3日成交量需高於5日均量1.5倍以上，量縮不進場"},
+    {title:"不追漲停隔日", content:"不在漲停板打開後或次日追高，等回測確認後再進場"},
+    {title:"強勢族群優先", content:"只買當日族群排名前三的強勢股，弱勢族群不進場"},
+  ],
+  stoploss: [
+    {title:"跌破季線停損", content:"股價跌破60日均線（季線）收盤確認，隔日出場"},
+    {title:"虧損7%停損", content:"從進場價下跌超過7%無條件執行停損，不猶豫"},
+    {title:"題材崩潰停損", content:"原本進場的題材或利多消失，不管損益立即出場"},
+  ],
+  takeprofit: [
+    {title:"高點回檔20%停利", content:"股價從波段最高點回檔超過20%，執行停利出場"},
+    {title:"獲利30%分批出場", content:"獲利達30%時先出一半倉位，剩下繼續持有"},
+    {title:"均線死叉停利", content:"月線跌破季線出現死叉時，不管獲利多少先出場"},
+  ],
+  mindset: [
+    {title:"被洗出不當天追", content:"被強勢股洗出後，不在當天追高，等回測起漲點+量縮2-3天確認再進"},
+    {title:"不加碼攤平", content:"持倉虧損時絕對不加碼攤平，只在獲利時才考慮加碼"},
+    {title:"不看盤不操作", content:"沒有明確進出場訊號時，不因為看盤心癢而頻繁操作"},
+  ]
+};
+
+// ==================== Auth ====================
+function googleLogin() {
+  window.location.href = `${API_BASE}/auth/login`;
+}
+
+function logout() {
+  localStorage.removeItem('tg_token');
+  localStorage.removeItem('tg_user');
+  document.getElementById('loginPage').style.display = 'flex';
+  document.getElementById('mainApp').style.display = 'none';
+  USER_ID = null;
+  AUTH_TOKEN = null;
+}
+
+async function initAuth() {
+  // 先檢查 URL 參數（Google callback 後帶回來的）
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  const urlUser  = params.get('user');
+  if(urlToken && urlUser) {
+    localStorage.setItem('tg_token', urlToken);
+    localStorage.setItem('tg_user', decodeURIComponent(urlUser));
+    // 清掉 URL 參數
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
+  const token   = localStorage.getItem('tg_token');
+  const userStr = localStorage.getItem('tg_user');
+  if(!token || !userStr) {
+    document.getElementById('loginPage').style.display = 'flex';
+    return;
+  }
+  try {
+    const user = JSON.parse(userStr);
+    USER_ID = user.email;
+    AUTH_TOKEN = token;
+    const avatar = document.getElementById('userAvatar');
+    if(user.picture) { avatar.src = user.picture; avatar.style.display = 'block'; }
+    document.getElementById('userName').textContent = user.name || user.email;
+    document.getElementById('loginPage').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'block';
+    document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
+    await checkApi();
+    await loadRules();
+    await loadDashboard(false);
+    loadReviewRules(); // 預先載入規則
+  } catch(e) { logout(); }
+}
+
+window.onload = initAuth;
+
+function go(t) {
+  tabIds.forEach(id => document.getElementById(id).classList.toggle('active', id===t));
+  document.querySelectorAll('.tab').forEach((b,i) => b.classList.toggle('active', tabIds[i]===t));
+  if(t === 'journal') loadJournal();
+  if(t === 'history') loadHistory();
+  if(t === 'review') { loadSellOptions(); loadReviewRules(); }
+  if(t === 'settings') loadCustomRules();
+}
+
+// ==================== 自訂規則 ====================
+
+function openAddRule() {
+  document.getElementById('ruleModalTitle').textContent = '新增交易規則';
+  document.getElementById('r-id').value = '';
+  document.getElementById('r-title').value = '';
+  document.getElementById('r-content').value = '';
+  document.getElementById('r-category').value = 'general';
+  document.getElementById('ruleModal').classList.add('open');
+}
+
+function openEditRule(id, title, content, category) {
+  document.getElementById('ruleModalTitle').textContent = '編輯規則';
+  document.getElementById('r-id').value = id;
+  document.getElementById('r-title').value = title;
+  document.getElementById('r-content').value = content;
+  document.getElementById('r-category').value = category || 'general';
+  document.getElementById('ruleModal').classList.add('open');
+}
+
+function closeRuleModal() {
+  document.getElementById('ruleModal').classList.remove('open');
+}
+
+async function saveCustomRule() {
+  const id = document.getElementById('r-id').value;
+  const body = {
+    title: document.getElementById('r-title').value,
+    content: document.getElementById('r-content').value,
+    category: document.getElementById('r-category').value,
+  };
+  if(!body.title || !body.content) { alert('請填寫標題和內容'); return; }
+  try {
+    if(id) {
+      await fetch(`${API_BASE}/users/${USER_ID}/custom-rules/${id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+    } else {
+      await fetch(`${API_BASE}/users/${USER_ID}/custom-rules`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+      });
+    }
+    closeRuleModal();
+    await loadCustomRules();
+  } catch(e) { alert(`儲存失敗：${e.message}`); }
+}
+
+async function deleteCustomRule(id, title) {
+  if(!confirm(`確定刪除「${title}」這條規則嗎？`)) return;
+  try {
+    await fetch(`${API_BASE}/users/${USER_ID}/custom-rules/${id}`, {method:'DELETE'});
+    await loadCustomRules();
+  } catch(e) { alert(`刪除失敗：${e.message}`); }
+}
+
+async function loadCustomRules() {
+  try {
+    const res = await fetch(`${API_BASE}/users/${USER_ID}/custom-rules`);
+    const rules = await res.json();
+    for(const [cat, cfg] of Object.entries(CAT_CONFIG)) {
+      const listEl = document.getElementById(`rules-${cat}-list`);
+      if(!listEl) continue;
+      const catRules = rules.filter(r => r.category === cat);
+      if(!catRules.length) {
+        listEl.innerHTML = `<div style="font-size:12px;color:#ccc;padding:6px 0">還沒有規則，點「+ 新增規則」加入</div>`;
+        continue;
+      }
+      listEl.innerHTML = catRules.map(r => `
+        <div style="padding:10px 0;border-bottom:1px solid #f0f0ec;display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:3px">${r.title}</div>
+            <div style="font-size:12px;color:#666;line-height:1.5">${r.content}</div>
+          </div>
+          <div style="display:flex;gap:6px;margin-left:10px;flex-shrink:0">
+            <button onclick="openEditRule('${r._id}','${(r.title||'').replace(/'/g,"\\'")}',\`${(r.content||'').replace(/`/g,'\\`')}\`,'${r.category}')"
+              style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #e8e8e4;background:#fff;cursor:pointer;color:#1a7a52">編輯</button>
+            <button onclick="deleteCustomRule('${r._id}','${(r.title||'').replace(/'/g,"\\'")}')"
+              style="font-size:11px;padding:3px 8px;border-radius:6px;border:none;background:#fdeaea;cursor:pointer;color:#d63b3b">刪除</button>
+          </div>
+        </div>`).join('');
+    }
+  } catch(e) { console.error('loadCustomRules error:', e); }
+}
+
+async function loadReviewRules() {
+  const area = document.getElementById('reviewRulesArea');
+  if(!area) return;
+  let userRules = [];
+  try {
+    const res = await fetch(`${API_BASE}/users/${USER_ID}/custom-rules`);
+    userRules = await res.json();
+  } catch {}
+
+  let html = '';
+  for(const [cat, cfg] of Object.entries(CAT_CONFIG)) {
+    const defaults = DEFAULT_RULES[cat] || [];
+    const customs  = userRules.filter(r => r.category === cat);
+    const all = [
+      ...defaults.map(r => ({...r, isDefault: true})),
+      ...customs.map(r => ({...r, isDefault: false}))
+    ];
+    if(!all.length) continue;
+    html += `<div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:${cfg.color};margin-bottom:6px">${cfg.label}</div>
+      <div style="background:#f8f8f5;border-radius:10px;padding:8px 12px">
+        ${all.map(r => `
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;cursor:pointer;border-bottom:1px solid #ebebeb">
+            <input type="checkbox" class="review-rule-check"
+              data-title="${(r.title||'').replace(/"/g,'&quot;')}"
+              data-content="${(r.content||'').replace(/"/g,'&quot;')}"
+              data-category="${cat}"
+              style="margin-top:2px;accent-color:${cfg.color};width:15px;height:15px;flex-shrink:0">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#1a1a1a">${r.title} ${r.isDefault ? '<span style="font-size:10px;color:#bbb;font-weight:400">預設</span>' : ''}</div>
+              <div style="font-size:11px;color:#888;margin-top:1px;line-height:1.4">${(r.content||'').length > 60 ? r.content.slice(0,60)+'...' : r.content}</div>
+            </div>
+          </label>`).join('')}
+      </div>
+    </div>`;
+  }
+  area.innerHTML = html || '<div style="font-size:12px;color:#aaa;text-align:center;padding:12px">沒有規則，去設定頁新增！</div>';
+}
+
+// ==================== API ====================
+
+async function checkApi() {
+  API_BASE = document.getElementById('apiUrl')?.value || 'http://localhost:8000';
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  try {
+    const r = await fetch(`${API_BASE}/`);
+    if(r.ok){ dot.classList.remove('red'); txt.textContent='API 已連線'; }
+    else throw new Error();
+  } catch { dot.classList.add('red'); txt.textContent='API 未連線'; }
+}
+
+async function loadRules() {
+  try {
+    const r = await fetch(`${API_BASE}/users/${USER_ID}/rules`);
+    const rules = await r.json();
+    PROFIT_PCT = rules.profit_trailing_pct || 20;
+    LOSS_PCT = rules.stoploss_pct || 7;
+    document.getElementById('profitSlider').value = PROFIT_PCT;
+    document.getElementById('pv').textContent = PROFIT_PCT + '%';
+    document.getElementById('lossSlider').value = LOSS_PCT;
+    document.getElementById('lv').textContent = LOSS_PCT + '%';
+  } catch {}
+}
+
+// ==================== Dashboard ====================
+
+async function loadDashboard(refreshPrices = false) {
+  try {
+    const res = await fetch(`${API_BASE}/holdings/${USER_ID}?refresh_prices=${refreshPrices}`);
+    const holdings = await res.json();
+
+    // 台股/美股分開計算
+    let twdValue = 0, twdCost = 0, usdValue = 0, usdCost = 0;
+    holdings.forEach(h => {
+      if(h.market === 'tw') {
+        twdValue += h.market_value || 0;
+        twdCost += h.cost || 0;
+      } else {
+        usdValue += h.market_value || 0;
+        usdCost += h.cost || 0;
+      }
+    });
+
+    const twdPnl = twdValue - twdCost;
+    const usdPnl = usdValue - usdCost;
+    const twdPnlPct = twdCost > 0 ? (twdPnl / twdCost * 100) : 0;
+    const usdPnlPct = usdCost > 0 ? (usdPnl / usdCost * 100) : 0;
+
+    document.getElementById('twdValue').textContent = `NT$${Math.round(twdValue).toLocaleString()}`;
+    document.getElementById('twdPnl').textContent = `損益 ${twdPnl >= 0 ? '+' : ''}NT$${Math.round(twdPnl).toLocaleString()} (${twdPnlPct >= 0 ? '+' : ''}${twdPnlPct.toFixed(2)}%)`;
+    document.getElementById('twdValue').className = `sc-val`;
+    document.getElementById('usdValue').textContent = `$${usdValue.toLocaleString(undefined, {maximumFractionDigits:0})}`;
+    document.getElementById('usdPnl').textContent = `損益 ${usdPnl >= 0 ? '+' : ''}$${usdPnl.toLocaleString(undefined, {maximumFractionDigits:0})} (${usdPnlPct >= 0 ? '+' : ''}${usdPnlPct.toFixed(2)}%)`;
+
+    await loadAlerts();
+
+    const list = document.getElementById('holdingsList');
+    if(!holdings.length) {
+      list.innerHTML = '<div class="empty">還沒有持倉，點右上角「+ 新增」加入第一筆</div>';
+      return;
+    }
+
+    // 台股美股分組顯示
+    const twHoldings = holdings.filter(h => h.market === 'tw');
+    const usHoldings = holdings.filter(h => h.market === 'us');
+    let html = '';
+    if(twHoldings.length) html += `<div style="font-size:11px;font-weight:600;color:#aaa;margin:8px 0 6px;letter-spacing:0.06em">🇹🇼 台股</div>` + twHoldings.map(h => renderHoldingCard(h)).join('');
+    if(usHoldings.length) html += `<div style="font-size:11px;font-weight:600;color:#aaa;margin:12px 0 6px;letter-spacing:0.06em">🇺🇸 美股</div>` + usHoldings.map(h => renderHoldingCard(h)).join('');
+    list.innerHTML = html;
+    loadSellOptions(holdings);
+  } catch(e) {
+    document.getElementById('holdingsList').innerHTML = `<div class="empty">無法載入，請確認後端是否已啟動<br><small style="color:#d63b3b">${e.message}</small></div>`;
+  }
+}
+
+function renderHoldingCard(h) {
+  const pnl = h.pnl_pct ?? ((h.current_price - h.entry_price) / h.entry_price * 100);
+  const pullback = h.pullback_pct ?? 0;
+  const profit_trigger = PROFIT_PCT;
+  const loss_trigger = LOSS_PCT;
+
+  // 停利進度條：只有獲利超過20%才開始算
+  const profitActivated = pnl >= 20;
+  const profitBarPct = profitActivated ? Math.min((pullback / profit_trigger) * 100, 100) : 0;
+  const profitRemaining = Math.max(profit_trigger - pullback, 0).toFixed(1);
+  const profitBarColor = profitBarPct > 80 ? 'red' : profitBarPct > 50 ? 'amber' : 'green';
+
+  // 停損進度條：虧損佔停損上限的比例
+  const lossUsed = pnl < 0 ? Math.min((Math.abs(pnl) / loss_trigger) * 100, 100) : 0;
+  const lossRemaining = Math.max(loss_trigger - Math.abs(Math.min(pnl, 0)), 0).toFixed(1);
+  const lossBarColor = lossUsed > 80 ? 'red' : lossUsed > 50 ? 'amber' : 'green';
+
+  // 均線標籤
+  let maHtml = '';
+  if(h.ma20_diff_pct !== undefined && h.ma20_diff_pct !== null) {
+    const ma20Class = h.ma20_diff_pct > 3 ? 'above' : h.ma20_diff_pct < -1 ? 'below' : 'near';
+    const ma60Class = h.ma60_diff_pct > 3 ? 'above' : h.ma60_diff_pct < -1 ? 'below' : 'near';
+    maHtml = `<div class="ma-row">
+      <span class="ma-pill ${ma20Class}">月線 ${h.ma20_diff_pct > 0 ? '+' : ''}${h.ma20_diff_pct?.toFixed(1)}%</span>
+      <span class="ma-pill ${ma60Class}">季線 ${h.ma60_diff_pct > 0 ? '+' : ''}${h.ma60_diff_pct?.toFixed(1)}%</span>
+    </div>`;
+  }
+
+  // 狀態
+  const statusBadge = {
+    'profit_alert': '<span class="badge r">停利警示</span>',
+    'loss_alert': '<span class="badge r">停損警示</span>',
+    'watch': '<span class="badge a">留意</span>',
+    'ok': '<span class="badge g">持有</span>',
+  }[h.status] || '<span class="badge g">持有</span>';
+
+  // 卡片邊框
+  const cardClass = ['profit_alert','loss_alert'].includes(h.status) ? 'holding-card alert-border' :
+                    h.status === 'watch' ? 'holding-card warn-border' : 'holding-card';
+
+  // 筆記
+  const noteHtml = `<div class="note-section">
+    <div class="note-header">
+      <span class="note-label">我的筆記</span>
+      <button class="note-edit-btn" onclick="toggleNote('${h._id}')">編輯</button>
+    </div>
+    <div id="noteDisplay-${h._id}" class="note-text">${h.note || '<span style="color:#ccc">還沒有筆記，記錄你現在的想法...</span>'}</div>
+    <div id="noteEdit-${h._id}" style="display:none">
+      <textarea class="note-input" id="noteInput-${h._id}" rows="3" placeholder="記錄你現在對這支的想法、市場狀況、需要注意的事...">${h.note || ''}</textarea>
+      <div class="note-actions">
+        <button class="note-save" onclick="saveNote('${h._id}')">儲存</button>
+        <button class="note-cancel" onclick="toggleNote('${h._id}')">取消</button>
+      </div>
+    </div>
+  </div>`;
+
+  return `<div class="${cardClass}" id="holding-${h._id}">
+    <div class="holding-top">
+      <div class="sicon">${h.name ? h.name.slice(0,2) : h.ticker.slice(0,2)}</div>
+      <div style="flex:1;min-width:0">
+        <div class="sname">${h.ticker} ${h.name || ''}</div>
+        <div class="ssub">${h.market === 'tw' ? '台股' : '美股'} · 進場 $${h.entry_price} · ${h.shares_display || h.shares+'股'} · ${h.entry_date}</div>
+        ${h.margin ? `<div style="display:inline-flex;align-items:center;padding:2px 8px;background:#fff8ec;border-radius:6px;font-size:11px;color:#9a6200;margin-top:3px;font-weight:600">融資 · 自備 $${Math.round(h.own_cost||0).toLocaleString()}</div>` : ''}
+        <div class="sstory">${h.story || ''}</div>
+      </div>
+      <div class="sright">
+        <div class="pnl ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%</div>
+        <div class="pnl-sub" style="font-size:13px;font-weight:600;color:#1a1a1a;margin-top:2px">現價 $${h.current_price || '—'}</div>
+        <div class="pnl-sub">市值 $${Math.round(h.market_value||0).toLocaleString()}</div>
+        <div style="margin-top:4px;display:flex;gap:4px;justify-content:flex-end">
+          ${statusBadge}
+          <button onclick="deleteHolding('${h._id}','${h.ticker} ${h.name||''}')" style="padding:3px 8px;background:#fdeaea;color:#d63b3b;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">刪除</button>
+        </div>
+      </div>
+    </div>
+
+    ${maHtml}
+
+    <div class="bar-section">
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span class="bar-label">停利倒數 ${profitActivated ? '' : '（獲利達 20% 後啟動）'}</span>
+          <span class="bar-val" style="color:${profitBarColor === 'red' ? '#d63b3b' : profitBarColor === 'amber' ? '#c97c0a' : '#1a7a52'}">
+            ${profitActivated ? `還差 ${profitRemaining}%` : `獲利 ${pnl.toFixed(1)}% / 需達 20%`}
+          </span>
+        </div>
+        <div class="bar-track"><div class="bar-fill ${profitActivated ? profitBarColor : 'green'}" style="width:${profitActivated ? profitBarPct : Math.min((pnl/20)*100,100)}%"></div></div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span class="bar-label">停損緩衝</span>
+          <span class="bar-val" style="color:${lossBarColor === 'red' ? '#d63b3b' : lossBarColor === 'amber' ? '#c97c0a' : '#1a7a52'}">
+            ${pnl < 0 ? `還有 ${lossRemaining}% 緩衝` : '安全'}
+          </span>
+        </div>
+        <div class="bar-track"><div class="bar-fill ${lossBarColor}" style="width:${lossUsed}%"></div></div>
+      </div>
+    </div>
+
+    ${h.margin && h.margin_daily_interest ? `
+    <div style="background:#fff8ec;border-radius:10px;padding:10px 14px;margin-bottom:10px;border:1px solid #f5d48c">
+      <div style="font-size:10px;font-weight:700;color:#9a6200;margin-bottom:6px;letter-spacing:0.06em">融資利息（年利率 6.35%）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+        <div><div style="font-size:10px;color:#aaa">借款金額</div><div style="font-size:13px;font-weight:700;color:#9a6200">$${Math.round(h.loan||0).toLocaleString()}</div></div>
+        <div><div style="font-size:10px;color:#aaa">每日利息</div><div style="font-size:13px;font-weight:700;color:#d63b3b">-$${Math.round(h.margin_daily_interest||0).toLocaleString()}</div></div>
+        <div><div style="font-size:10px;color:#aaa">累計已付（${h.margin_days||0}天）</div><div style="font-size:13px;font-weight:700;color:#d63b3b">-$${Math.round(h.margin_total_interest||0).toLocaleString()}</div></div>
+      </div>
+    </div>` : ''}
+
+    ${h.is_leveraged ? `
+    <div style="background:${h.leverage_warning ? '#fdeaea' : '#fff8ec'};border-radius:10px;padding:10px 14px;margin-bottom:10px;border:1px solid ${h.leverage_warning ? '#f5c6c6' : '#f5d48c'}">
+      <div style="font-size:10px;font-weight:700;color:${h.leverage_warning ? '#d63b3b' : '#9a6200'};margin-bottom:4px;letter-spacing:0.06em">⚡ 槓桿 ETF 每日耗損警示</div>
+      <div style="font-size:12px;color:${h.leverage_warning ? '#d63b3b' : '#9a6200'}">
+        持有 ${h.leverage_days||0} 天，估計耗損約 <strong>${h.leverage_decay_pct||0}%</strong>
+        ${h.leverage_warning ? '— ⚠ 耗損已超過 5%，波動耗損明顯，請評估是否繼續持有' : '— 目前耗損尚在可接受範圍'}
+      </div>
+    </div>` : ''}
+
+    ${noteHtml}
+  </div>`;
+}
+
+// ==================== 筆記 ====================
+
+function toggleNote(holdingId) {
+  const display = document.getElementById(`noteDisplay-${holdingId}`);
+  const edit = document.getElementById(`noteEdit-${holdingId}`);
+  const isEditing = edit.style.display !== 'none';
+  display.style.display = isEditing ? 'block' : 'none';
+  edit.style.display = isEditing ? 'none' : 'block';
+  if(!isEditing) document.getElementById(`noteInput-${holdingId}`).focus();
+}
+
+async function saveNote(holdingId) {
+  const note = document.getElementById(`noteInput-${holdingId}`).value;
+  try {
+    await fetch(`${API_BASE}/holdings/${holdingId}/note`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({note})
+    });
+    document.getElementById(`noteDisplay-${holdingId}`).innerHTML = note || '<span style="color:#ccc">還沒有筆記...</span>';
+    toggleNote(holdingId);
+  } catch(e) { alert(`儲存失敗：${e.message}`); }
+}
+
+// ==================== 警示 ====================
+
+async function loadAlerts() {
+  try {
+    const res = await fetch(`${API_BASE}/scan/alerts/${USER_ID}`);
+    const data = await res.json();
+    const area = document.getElementById('alertsArea');
+    if(!data.alerts?.length){ area.innerHTML=''; return; }
+    area.innerHTML = `<div class="card-title" style="padding:0 0 8px">⚠ 警示中心</div>` +
+      data.alerts.map(a => `<div class="alert-c ${a.severity==='medium'?'warn':''}">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div><div class="at">${a.ticker} — ${a.message}</div></div>
+          <span class="badge ${a.severity==='high'?'r':'a'}">${a.severity==='high'?'緊急':'注意'}</span>
+        </div></div>`).join('');
+  } catch {}
+}
+
+// ==================== 新增持倉 ====================
+
+async function deleteHolding(id, name) {
+  if(!confirm(`確定要刪除「${name}」這筆持倉嗎？`)) return;
+  try {
+    await fetch(`${API_BASE}/holdings/${id}`, {method:'DELETE'});
+    await loadDashboard(false);
+  } catch(e) { alert(`刪除失敗：${e.message}`); }
+}
+
+function openAddHolding() {
+  document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('m-ticker').value = '';
+  document.getElementById('m-name').value = '';
+  document.getElementById('m-search').value = '';
+  document.getElementById('selectedStock').style.display = 'none';
+  document.getElementById('searchDropdown').style.display = 'none';
+  document.getElementById('m-margin').checked = false;
+  document.getElementById('marginDetail').style.display = 'none';
+  setMarket('tw');
+  document.getElementById('addModal').classList.add('open');
+}
+function closeModal() { document.getElementById('addModal').classList.remove('open'); }
+
+function setMarket(mkt) {
+  document.getElementById('m-market').value = mkt;
+  document.getElementById('mktTW').style.background = mkt==='tw' ? '#e8f5ee' : '#fff';
+  document.getElementById('mktTW').style.color = mkt==='tw' ? '#1a7a52' : '#888';
+  document.getElementById('mktTW').style.borderColor = mkt==='tw' ? '#1a7a52' : '#e8e8e4';
+  document.getElementById('mktUS').style.background = mkt==='us' ? '#e8f5ee' : '#fff';
+  document.getElementById('mktUS').style.color = mkt==='us' ? '#1a7a52' : '#888';
+  document.getElementById('mktUS').style.borderColor = mkt==='us' ? '#1a7a52' : '#e8e8e4';
+  document.getElementById('sharesLabel').textContent = mkt==='tw' ? '買進張數（台股 1張=1000股）' : '買進股數';
+  // 清空搜尋
+  document.getElementById('m-ticker').value = '';
+  document.getElementById('m-name').value = '';
+  document.getElementById('m-search').value = '';
+  document.getElementById('selectedStock').style.display = 'none';
+}
+
+let searchTimeout;
+async function searchStock(q) {
+  clearTimeout(searchTimeout);
+  const dropdown = document.getElementById('searchDropdown');
+  if(!q || q.length < 1) { dropdown.style.display='none'; return; }
+  searchTimeout = setTimeout(async () => {
+    const market = document.getElementById('m-market').value;
+    try {
+      const res = await fetch(`${API_BASE}/stock/search?q=${encodeURIComponent(q)}&market=${market}`);
+      const results = await res.json();
+      if(!results.length) { dropdown.style.display='none'; return; }
+      dropdown.style.display = 'block';
+      dropdown.innerHTML = results.map(r =>
+        `<div onclick="selectStock('${r.ticker}','${r.name}')"
+          style="padding:10px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f0;display:flex;justify-content:space-between;align-items:center"
+          onmouseover="this.style.background='#f8f8f5'" onmouseout="this.style.background='#fff'">
+          <span><strong>${r.ticker}</strong> ${r.name}</span>
+          <span style="font-size:11px;color:#aaa">${r.market==='tw'?'台股':'美股'}</span>
+        </div>`
+      ).join('');
+    } catch {}
+  }, 300);
+}
+
+function selectStock(ticker, name) {
+  document.getElementById('m-ticker').value = ticker;
+  document.getElementById('m-name').value = name;
+  document.getElementById('m-search').value = `${ticker} ${name}`;
+  document.getElementById('searchDropdown').style.display = 'none';
+  const sel = document.getElementById('selectedStock');
+  sel.style.display = 'block';
+  sel.textContent = `✓ ${ticker} ${name}`;
+  updateMarginCalc();
+}
+
+function toggleMargin(checked) {
+  document.getElementById('marginDetail').style.display = checked ? 'block' : 'none';
+  if(checked) updateMarginCalc();
+}
+
+function setMarginRatio(ratio) {
+  document.getElementById('m-margin-ratio').value = ratio;
+  ['mr40','mr50','mr60'].forEach(id => {
+    const btn = document.getElementById(id);
+    btn.style.background = '#fff';
+    btn.style.borderColor = '#e8e8e4';
+  });
+  const map = {0.4:'mr60', 0.5:'mr50', 0.6:'mr40'};
+  // 融資成數 = 1 - 自備成數
+  const btnMap = {'0.4':'mr60','0.5':'mr50','0.6':'mr40'};
+  // 自備款比例對應按鈕
+  // ratio = 借款比例 (0.6=融六成借六成)
+  const selfMap = {'0.4':'mr60','0.5':'mr50','0.6':'mr40'};
+  // 重新想：融資六成=借六成=自備四成
+  const btnId = ratio===0.6?'mr40':ratio===0.5?'mr50':'mr60';
+  document.getElementById(btnId).style.background = '#fff8ec';
+  document.getElementById(btnId).style.borderColor = '#c97c0a';
+  updateMarginCalc();
+}
+
+function updateMarginCalc() {
+  if(!document.getElementById('m-margin').checked) return;
+  const entry = parseFloat(document.getElementById('m-entry').value) || 0;
+  const shares = parseInt(document.getElementById('m-shares').value) || 0;
+  const market = document.getElementById('m-market').value;
+  const ratio = parseFloat(document.getElementById('m-margin-ratio').value) || 0.6;
+  const multiplier = market === 'tw' ? 1000 : 1;
+  const total = entry * shares * multiplier;
+  const own = total * (1 - ratio);
+  const loan = total * ratio;
+  if(total > 0) {
+    document.getElementById('marginCalc').textContent =
+      `總市值 $${Math.round(total).toLocaleString()} | 自備款 $${Math.round(own).toLocaleString()} | 借款 $${Math.round(loan).toLocaleString()}`;
+  }
+}
+
+async function addHolding() {
+  const ticker = document.getElementById('m-ticker').value;
+  const name = document.getElementById('m-name').value;
+  if(!ticker || !name) { alert('請先搜尋並選擇股票'); return; }
+  const market = document.getElementById('m-market').value;
+  const entry = parseFloat(document.getElementById('m-entry').value);
+  const shares = parseInt(document.getElementById('m-shares').value);
+  if(!entry || !shares) { alert('請填寫進場價格和張/股數'); return; }
+
+  const body = {
+    user_id: USER_ID,
+    ticker,
+    name,
+    market,
+    entry_price: entry,
+    entry_date: document.getElementById('m-date').value,
+    shares,
+    unit: market === 'tw' ? 'lot' : 'share',
+    margin: document.getElementById('m-margin').checked,
+    margin_ratio: parseFloat(document.getElementById('m-margin-ratio').value) || 0.6,
+    story: document.getElementById('m-story').value,
+  };
+  try {
+    await fetch(`${API_BASE}/holdings`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    closeModal();
+    await loadDashboard(false);
+  } catch(e) { alert(`新增失敗：${e.message}`); }
+}
+
+function loadSellOptions(holdings) {
+  if(!holdings) {
+    fetch(`${API_BASE}/holdings/${USER_ID}`).then(r=>r.json()).then(h=>loadSellOptions(h)).catch(()=>{});
+    return;
+  }
+  document.getElementById('s-ticker').innerHTML = holdings.map(h =>
+    `<option value="${h._id}">${h.ticker} ${h.name}</option>`).join('');
+}
+
+// ==================== 刪除持倉 ====================
+
+async function deleteHolding(holdingId, name) {
+  if(!confirm(`確定要刪除「${name}」這筆持倉嗎？\n此操作無法復原。`)) return;
+  try {
+    await fetch(`${API_BASE}/holdings/${holdingId}`, {method: 'DELETE'});
+    document.getElementById(`holding-${holdingId}`).remove();
+    await loadDashboard(false);
+  } catch(e) { alert(`刪除失敗：${e.message}`); }
+}
+
+// ==================== Scan ====================
+
+async function loadScan() {
+  const area = document.getElementById('scanResult');
+  area.innerHTML = '<div class="loading"><span class="spinner"></span>掃描中，請稍候（約 30 秒）...</div>';
+  try {
+    const [twRes, usRes] = await Promise.all([fetch(`${API_BASE}/scan/tw`), fetch(`${API_BASE}/scan/us`)]);
+    const tw = await twRes.json();
+    const us = await usRes.json();
+
+    const scanDate = tw.date || new Date().toISOString().split('T')[0];
+
+    // 輔助函數：渲染族群
+    function renderSector(s, i, market) {
+      const hotStocks = s.stocks?.filter(st => st.is_hot) || [];
+      const sectorId = `sector-${market}-${i}`;
+      const isTW = market === 'tw';
+      const tvBase = isTW ? 'https://tw.tradingview.com/chart/?symbol=TWSE:' : 'https://www.tradingview.com/chart/?symbol=NASDAQ:';
+      return `<div class="sector-item">
+        <div class="sector-h">
+          <div style="display:flex;align-items:center;gap:8px"><span class="badge b">#${i+1}</span><span class="sector-name">${s.sector}</span></div>
+          <span class="sector-pct" style="color:${s.avg_change_pct>=0?'#1a7a52':'#d63b3b'}">${s.avg_change_pct>=0?'+':''}${s.avg_change_pct}%</span>
+        </div>
+        <div class="sector-meta">均漲 ${s.avg_change_pct}%，成交量 5 日均量 ${s.avg_vol_ratio}×</div>
+        <div class="chips">
+          ${(s.stocks||[]).slice(0,3).map(st=>`
+            <span class="chip" onclick="window.open('${tvBase}${st.ticker}','_blank')" style="cursor:pointer" title="開啟K線圖">
+              <span class="chip-code">${st.ticker}</span>
+              <span style="font-size:10px;color:#888;margin-left:3px">${st.name||''}</span>
+              <span class="chip-pct ${st.change_pct<0?'r':''}">${st.change_pct>=0?'+':''}${st.change_pct}%</span>
+            </span>`).join('')}
+          ${(s.stocks||[]).length > 3 ? `<button onclick="expandSector('${sectorId}')" style="background:none;border:1px solid #e8e8e4;border-radius:8px;padding:4px 10px;font-size:11px;color:#1a7a52;cursor:pointer" id="${sectorId}-btn">+ 更多</button>` : ''}
+        </div>
+        <div id="${sectorId}-detail" style="display:none;margin-top:8px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <tr style="color:#aaa;font-size:10px;font-weight:600;border-bottom:1px solid #f0f0ec">
+              <td style="padding:4px 0">代號</td><td>名稱</td><td style="text-align:right">今日</td><td style="text-align:right">近5日</td><td style="text-align:right">量比</td>
+              ${isTW ? '<td style="text-align:right">距漲停</td>' : ''}
+            </tr>
+            ${(s.stocks||[]).map(st=>`
+              <tr style="border-bottom:1px solid #f8f8f5;cursor:pointer" onclick="window.open('${tvBase}${st.ticker}','_blank')">
+                <td style="padding:6px 0;font-weight:600;color:#2563eb">${st.ticker}</td>
+                <td style="color:#666">${st.name||'—'}</td>
+                <td style="text-align:right;color:${st.change_pct>=0?'#1a7a52':'#d63b3b'};font-weight:600">${st.change_pct>=0?'+':''}${st.change_pct}%</td>
+                <td style="text-align:right;color:${st.change_5d_pct>=0?'#1a7a52':'#d63b3b'}">${st.change_5d_pct>=0?'+':''}${st.change_5d_pct}%</td>
+                <td style="text-align:right;color:#888">${st.vol_ratio}x</td>
+                ${isTW ? `<td style="text-align:right;color:${st.to_limit_pct<2?'#d63b3b':'#888'}">${st.to_limit_pct!==null?st.to_limit_pct.toFixed(1)+'%':'—'}</td>` : ''}
+              </tr>`).join('')}
+          </table>
+          <div style="font-size:10px;color:#aaa;margin-top:6px">💡 點擊個股開啟 TradingView K線圖</div>
+        </div>
+        ${hotStocks.length ? `<div class="hotzone">⚡ 噴出警示 — ${hotStocks.map(st=>`${st.ticker} ${st.name||''} 近5日 +${st.change_5d_pct}%${st.to_limit_pct!=null?`（距漲停 ${st.to_limit_pct?.toFixed(1)}%）`:''}`).join('，')}</div>` : ''}
+      </div>`;
+    }
+
+    let html = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="card-title" style="margin-bottom:0">🇹🇼 台股 — 前五強勢族群</div>
+      <div style="font-size:11px;color:#aaa">📅 ${scanDate} · Yahoo Finance</div>
+    </div>
+    <div class="card" style="padding:4px 18px">
+      ${(tw.top_sectors||[]).map((s,i) => renderSector(s, i, 'tw')).join('')}
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 8px">
+      <div class="card-title" style="margin-bottom:0">🇺🇸 美股 — 前五強勢族群</div>
+      <div style="font-size:11px;color:#aaa">📅 ${scanDate} · Yahoo Finance</div>
+    </div>
+    <div class="card" style="padding:4px 18px">
+      ${(us.top_sectors||[]).map((s,i) => renderSector(s, i, 'us')).join('')}
+    </div>`;
+
+    area.innerHTML = html;
+  } catch(e) {
+    area.innerHTML = `<div class="empty">掃描失敗：${e.message}</div>`;
+  }
+}
+
+function expandSector(sectorId) {
+  const detail = document.getElementById(`${sectorId}-detail`);
+  const btn = document.getElementById(`${sectorId}-btn`);
+  if(!detail) return;
+  const isOpen = detail.style.display !== 'none';
+  detail.style.display = isOpen ? 'none' : 'block';
+  if(btn) btn.textContent = isOpen ? '+ 更多' : '收起';
+}
+
+function setStop(val) { document.getElementById('b-stop').value = val; }
+function setTarget(val) { document.getElementById('b-target').value = val; }
+function setSellReason(val) {
+  const ta = document.getElementById('s-reason');
+  ta.value = val;
+  ta.focus();
+  ta.setSelectionRange(val.length, val.length);
+}
+
+let reviewSearchTimeout;
+async function searchReviewStock(q) {
+  clearTimeout(reviewSearchTimeout);
+  const dropdown = document.getElementById('b-searchDropdown');
+  if(!q || q.length < 1) { dropdown.style.display='none'; return; }
+  reviewSearchTimeout = setTimeout(async () => {
+    const market = document.getElementById('b-market').value;
+    try {
+      const res = await fetch(`${API_BASE}/stock/search?q=${encodeURIComponent(q)}&market=${market}`);
+      const results = await res.json();
+      if(!results.length) { dropdown.style.display='none'; return; }
+      dropdown.style.display = 'block';
+      dropdown.innerHTML = results.map(r =>
+        `<div onclick="selectReviewStock('${r.ticker}','${r.name}')"
+          style="padding:10px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f0;display:flex;justify-content:space-between"
+          onmouseover="this.style.background='#f8f8f5'" onmouseout="this.style.background='#fff'">
+          <span><strong>${r.ticker}</strong> ${r.name}</span>
+          <span style="font-size:11px;color:#aaa">${r.market==='tw'?'台股':'美股'}</span>
+        </div>`
+      ).join('');
+    } catch {}
+  }, 300);
+}
+
+function selectReviewStock(ticker, name) {
+  document.getElementById('b-ticker').value = ticker;
+  document.getElementById('b-search').value = `${ticker} ${name}`;
+  document.getElementById('b-searchDropdown').style.display = 'none';
+  const sel = document.getElementById('b-selectedStock');
+  sel.style.display = 'block';
+  sel.textContent = `✓ ${ticker} ${name} — 已選擇，可點擊「分析技術面」`;
+}
+
+// ==================== Technical Analysis ====================
+
+let lastAnalysis = null;
+
+async function fetchAnalysis() {
+  const ticker = document.getElementById('b-ticker').value.trim() || document.getElementById('b-search').value.trim();
+  const market = document.getElementById('b-market').value;
+  const box = document.getElementById('analysisBox');
+  if(!ticker){ alert('請先填入股票代號'); return; }
+
+  box.style.display = 'block';
+  box.innerHTML = `<div style="background:#f8f8f5;border-radius:12px;padding:14px 16px;margin-bottom:12px;border:1px solid #e8e8e4">
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#1a7a52"><span class="spinner"></span>分析技術指標中...</div>
+  </div>`;
+
+  try {
+    const res = await fetch(`${API_BASE}/stock/${market}/${ticker}/analysis`);
+    if(!res.ok) throw new Error('找不到這支股票，請確認代號');
+    const d = await res.json();
+    lastAnalysis = d;
+
+    const dirColor = d.direction==='偏多' ? '#1a7a52' : d.direction==='偏空' ? '#d63b3b' : '#c97c0a';
+    const dirBg = d.direction==='偏多' ? '#e8f5ee' : d.direction==='偏空' ? '#fdeaea' : '#fef3e2';
+
+    const kd = d.kd;
+    const kdSignal = kd.golden_cross ? '🟢 黃金交叉' : kd.death_cross ? '🔴 死亡交叉' :
+                     kd.overbought ? '🟡 超買區' : kd.oversold ? '🟢 超賣區' : '— 中性';
+    const rsiSignal = d.rsi > 70 ? `🔴 超買（${d.rsi}）` : d.rsi < 30 ? `🟢 超賣（${d.rsi}）` :
+                      d.rsi > 50 ? `🟢 偏多（${d.rsi}）` : `🟡 偏弱（${d.rsi}）`;
+    const macdSignal = d.macd.bullish ? (d.macd.expanding ? '🟢 翻揚擴張' : '🟢 在信號線上') :
+                       (d.macd.expanding ? '🔴 跌勢擴張' : '🔴 在信號線下');
+    const bbSignal = d.bollinger.pct > 80 ? `🔴 接近上緣（${d.bollinger.pct}%）` :
+                     d.bollinger.pct < 20 ? `🟢 接近下緣（${d.bollinger.pct}%）` :
+                     `🟡 帶內（${d.bollinger.pct}%）`;
+    const volSignal = d.volume.surge ? `🟢 爆量（${d.volume.ratio}x）` : `— 正常（${d.volume.ratio}x）`;
+    const maSignal = d.ma20_diff_pct > 0 && d.ma60_diff_pct > 0 ? '🟢 月線季線上方' :
+                     d.ma20_diff_pct < 0 && d.ma60_diff_pct < 0 ? '🔴 月線季線下方' :
+                     d.ma20_diff_pct > 0 ? '🟡 月線上 / 季線下' : '🟡 月線下 / 季線上';
+
+    box.innerHTML = `<div style="background:#f8f8f5;border-radius:12px;padding:14px 16px;margin-bottom:12px;border:1px solid #e8e8e4">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:#aaa;letter-spacing:0.06em">技術面分析 — ${ticker.toUpperCase()}</div>
+        <div style="background:${dirBg};color:${dirColor};font-size:13px;font-weight:700;padding:4px 12px;border-radius:20px">${d.direction}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">KD</div>
+          <div style="font-size:12px;font-weight:600">K=${kd.k} / D=${kd.d}</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${kdSignal}</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">RSI (14)</div>
+          <div style="font-size:12px;font-weight:600">${d.rsi}</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${rsiSignal}</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">MACD</div>
+          <div style="font-size:12px;font-weight:600">${d.macd.macd > 0 ? '+' : ''}${d.macd.macd}</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${macdSignal}</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">布林通道</div>
+          <div style="font-size:12px;font-weight:600">${d.bollinger.lower} – ${d.bollinger.upper}</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${bbSignal}</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">均線位置</div>
+          <div style="font-size:12px;font-weight:600">月 ${d.ma20_diff_pct>0?'+':''}${d.ma20_diff_pct}% / 季 ${d.ma60_diff_pct>0?'+':''}${d.ma60_diff_pct}%</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${maSignal}</div>
+        </div>
+        <div style="background:#fff;border-radius:10px;padding:10px 12px;border:1px solid #e8e8e4">
+          <div style="font-size:10px;color:#aaa;margin-bottom:4px;font-weight:600">成交量</div>
+          <div style="font-size:12px;font-weight:600">${d.volume.ratio}x 均量</div>
+          <div style="font-size:11px;color:#666;margin-top:2px">${volSignal}</div>
+        </div>
+      </div>
+      ${d.bull_signals.length ? `<div style="margin-bottom:6px"><span style="font-size:11px;font-weight:600;color:#1a7a52">多方信號：</span><span style="font-size:11px;color:#666">${d.bull_signals.join('、')}</span></div>` : ''}
+      ${d.bear_signals.length ? `<div><span style="font-size:11px;font-weight:600;color:#d63b3b">空方信號：</span><span style="font-size:11px;color:#666">${d.bear_signals.join('、')}</span></div>` : ''}
+    </div>`;
+  } catch(e) {
+    box.innerHTML = `<div style="background:#fdeaea;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:13px;color:#d63b3b">${e.message}</div>`;
+  }
+}
+
+// ==================== Review ====================
+
+function swR(t) {
+  document.getElementById('buyForm').style.display = t==='buy'?'block':'none';
+  document.getElementById('sellForm').style.display = t==='sell'?'block':'none';
+  document.getElementById('rBuy').classList.toggle('active', t==='buy');
+  document.getElementById('rSell').classList.toggle('active', t==='sell');
+}
+
+async function doReview(type) {
+  const btnEl = document.getElementById(type==='buy'?'buyBtn':'sellBtn');
+  const resEl = document.getElementById(type==='buy'?'buyRes':'sellRes');
+  btnEl.disabled = true; btnEl.textContent = '審核中...';
+
+  let ticker, market, inputs;
+  if(type==='buy') {
+    ticker = document.getElementById('b-ticker').value || document.getElementById('b-search').value || '（未填）';
+    market = document.getElementById('b-market').value;
+
+    const checkedRules = [];
+    document.querySelectorAll('.review-rule-check:checked').forEach(cb => {
+      checkedRules.push({
+        title: cb.dataset.title,
+        content: cb.dataset.content,
+        category: cb.dataset.category
+      });
+    });
+
+    inputs = {
+      story: document.getElementById('b-story').value || '（未填）',
+      checked_rules: checkedRules
+    };
+  } else {
+    const sel = document.getElementById('s-ticker');
+    ticker = sel.options[sel.selectedIndex]?.text||'';
+    market = 'tw';
+    inputs = { reason: document.getElementById('s-reason').value||'（未填）' };
+  }
+
+  resEl.innerHTML = `<div class="card"><div class="ai-box"><div class="ai-label"><span class="spinner"></span>AI 審核中，分析技術面與理由...</div></div></div>`;
+
+  try {
+    const resp = await fetch(`${API_BASE}/reviews/ai`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        user_id: USER_ID,
+        type,
+        ticker,
+        market,
+        inputs,
+        profit_pct: PROFIT_PCT,
+        stoploss_pct: LOSS_PCT
+      })
+    });
+    if(!resp.ok) throw new Error(`後端回傳 ${resp.status}`);
+    const data = await resp.json();
+    const text = data.text || '無法取得回覆';
+    const verdict = data.verdict || 'hold';
+
+    const verdictMap = {
+      pass: {cls:'pass', label:'🟢 審核通過 — 可以考慮進場'},
+      fail: {cls:'fail', label:'🔴 不通過 — 不建議進場'},
+      hold: {cls:'hold', label:'🟡 審慎評估 — 條件尚可但需再觀察'}
+    };
+    const v = verdictMap[verdict] || verdictMap.hold;
+
+    // 打字機效果顯示
+    resEl.innerHTML = `<div class="card"><div class="ai-box"><div class="ai-label">AI 審核報告</div><div class="ai-text" id="streamText"></div></div></div>`;
+    const streamEl = document.getElementById('streamText');
+    let i = 0;
+    const cursor = document.createElement('span'); cursor.className='cursor'; streamEl.appendChild(cursor);
+    const iv = setInterval(() => {
+      if(i < text.length) { cursor.insertAdjacentText('beforebegin', text[i]); i++; }
+      else {
+        clearInterval(iv); cursor.remove();
+        streamEl.closest('.card').innerHTML += `<div class="verdict ${v.cls}">${v.label}</div>`;
+      }
+    }, 12);
+
+  } catch(e) {
+    resEl.innerHTML = `<div class="card"><div class="ai-box" style="background:#fdeaea"><div class="ai-label" style="color:#d63b3b">審核失敗</div><div class="ai-text">${e.message}<br><br>請確認：<br>1. 後端正在執行中<br>2. .env 裡有設定 ANTHROPIC_API_KEY</div></div></div>`;
+  }
+  btnEl.disabled=false; btnEl.textContent='送出 AI 審核';
+}
+
+// ==================== Review History ====================
+
+async function loadHistory() {
+  const list = document.getElementById('historyList');
+  list.innerHTML = '<div class="loading"><span class="spinner"></span>載入中...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/reviews/${USER_ID}`);
+    const reviews = await res.json();
+    if(!reviews.length){ list.innerHTML='<div class="empty">還沒有審核紀錄</div>'; return; }
+
+    list.innerHTML = `<div class="card" style="padding:4px 18px">` +
+      reviews.map(r => {
+        const verdictMap = {pass:'<span class="badge g">通過</span>', fail:'<span class="badge r">不通過</span>', hold:'<span class="badge a">暫緩</span>'};
+        const date = r.created_at ? r.created_at.split('T')[0] : '—';
+        const typeLabel = r.type === 'buy' ? '買進審核' : '賣出審核';
+        const snippetId = `snippet-${r._id}`;
+        return `<div class="review-item">
+          <div class="review-top">
+            <span class="review-ticker">${r.ticker}</span>
+            <div style="display:flex;align-items:center;gap:6px">${verdictMap[r.verdict]||''}<span class="review-date">${date}</span></div>
+          </div>
+          <div class="review-type">${typeLabel}</div>
+          <div class="review-snippet" id="${snippetId}">${r.ai_response || ''}</div>
+          <button class="review-expand" onclick="toggleReview('${snippetId}', this)">展開全文</button>
+        </div>`;
+      }).join('') + '</div>';
+  } catch(e) {
+    list.innerHTML = `<div class="empty">載入失敗：${e.message}</div>`;
+  }
+}
+
+function toggleReview(id, btn) {
+  const el = document.getElementById(id);
+  const expanded = el.style.webkitLineClamp === 'unset';
+  el.style.webkitLineClamp = expanded ? '3' : 'unset';
+  el.style.overflow = expanded ? 'hidden' : 'visible';
+  btn.textContent = expanded ? '展開全文' : '收起';
+}
+
+// ==================== Journal ====================
+
+async function loadJournal() {
+  try {
+    const [statsRes, tradesRes] = await Promise.all([
+      fetch(`${API_BASE}/trades/${USER_ID}/stats`),
+      fetch(`${API_BASE}/trades/${USER_ID}`)
+    ]);
+    const stats = await statsRes.json();
+    const trades = await tradesRes.json();
+    document.getElementById('s-total').textContent = stats.total||0;
+    document.getElementById('s-winrate').textContent = stats.win_rate ? `${stats.win_rate}%` : '—';
+    document.getElementById('s-profit').textContent = stats.avg_profit ? `+${stats.avg_profit}%` : '—';
+    document.getElementById('s-loss').textContent = stats.avg_loss ? `${stats.avg_loss}%` : '—';
+    const list = document.getElementById('tradesList');
+    if(!trades.length){ list.innerHTML='<div class="empty">還沒有交易紀錄</div>'; return; }
+    list.innerHTML = `<div class="card-title" style="padding:12px 0 4px">交易紀錄</div>` +
+      trades.map(t=>`<div class="log-item">
+        <div class="ldot ${t.pnl_pct>0?'g':t.pnl_pct<-5?'r':'a'}"></div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:600">${t.ticker} ${t.name}</div><div style="font-size:11px;color:#aaa">${t.exit_reason}</div></div>
+        <div style="text-align:right"><div style="font-size:14px;font-weight:700;color:${t.pnl_pct>=0?'#1a7a52':'#d63b3b'}">${t.pnl_pct>=0?'+':''}${t.pnl_pct}%</div><div style="font-size:10px;color:#aaa">${t.exit_date}</div></div>
+      </div>`).join('');
+  } catch(e) { document.getElementById('tradesList').innerHTML=`<div class="empty">載入失敗：${e.message}</div>`; }
+}
+
+// ==================== Settings ====================
+
+async function saveRules() {
+  const rules = {
+    profit_trailing_pct: parseInt(document.getElementById('profitSlider').value),
+    stoploss_pct: parseInt(document.getElementById('lossSlider').value),
+    stoploss_ma: [document.getElementById('maMonthly').checked?'monthly':null, document.getElementById('maQuarterly').checked?'quarterly':null].filter(Boolean),
+    markets: ['tw','us'], strategy: 'momentum_midlong'
+  };
+  try {
+    await fetch(`${API_BASE}/users/${USER_ID}/rules`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(rules)});
+    PROFIT_PCT = rules.profit_trailing_pct;
+    LOSS_PCT = rules.stoploss_pct;
+    alert('✓ 規則已儲存！');
+  } catch(e) { alert(`儲存失敗：${e.message}`); }
+}
+</script>
+</body>
+</html>
