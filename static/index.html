@@ -738,28 +738,40 @@ async function loadDashboard(refreshPrices = false) {
     const res = await fetch(`${API_BASE}/holdings/${USER_ID}?refresh_prices=${refreshPrices}`);
     const holdings = await res.json();
 
-    // 台股/美股分開計算
-    let twdValue = 0, twdCost = 0, usdValue = 0, usdCost = 0;
+    // 台股/美股分開計算（區分總成本 vs 自備款）
+    let twdValue = 0, twdCost = 0, twdOwnCost = 0;
+    let usdValue = 0, usdCost = 0, usdOwnCost = 0;
+
     holdings.forEach(h => {
+      const mv = h.market_value || 0;
+      const cost = h.cost || 0;
+      const ownCost = h.margin ? (h.own_cost || cost * (1 - (h.margin_ratio || 0.6))) : cost;
       if(h.market === 'tw') {
-        twdValue += h.market_value || 0;
-        twdCost += h.cost || 0;
+        twdValue += mv; twdCost += cost; twdOwnCost += ownCost;
       } else {
-        usdValue += h.market_value || 0;
-        usdCost += h.cost || 0;
+        usdValue += mv; usdCost += cost; usdOwnCost += ownCost;
       }
     });
 
     const twdPnl = twdValue - twdCost;
     const usdPnl = usdValue - usdCost;
-    const twdPnlPct = twdCost > 0 ? (twdPnl / twdCost * 100) : 0;
-    const usdPnlPct = usdCost > 0 ? (usdPnl / usdCost * 100) : 0;
+    const twdPnlPct     = twdCost > 0     ? (twdPnl / twdCost * 100)     : 0;
+    const twdCapitalPct = twdOwnCost > 0  ? (twdPnl / twdOwnCost * 100)  : 0;
+    const usdPnlPct     = usdCost > 0     ? (usdPnl / usdCost * 100)     : 0;
+    const usdCapitalPct = usdOwnCost > 0  ? (usdPnl / usdOwnCost * 100)  : 0;
+    const hasMarginTW = holdings.some(h => h.market === 'tw' && h.margin);
+    const hasMarginUS = holdings.some(h => h.market === 'us' && h.margin);
 
     document.getElementById('twdValue').textContent = `NT$${Math.round(twdValue).toLocaleString()}`;
-    document.getElementById('twdPnl').textContent = `損益 ${twdPnl >= 0 ? '+' : ''}NT$${Math.round(twdPnl).toLocaleString()} (${twdPnlPct >= 0 ? '+' : ''}${twdPnlPct.toFixed(2)}%)`;
-    document.getElementById('twdValue').className = `sc-val`;
-    document.getElementById('usdValue').textContent = `$${usdValue.toLocaleString(undefined, {maximumFractionDigits:0})}`;
-    document.getElementById('usdPnl').textContent = `損益 ${usdPnl >= 0 ? '+' : ''}$${usdPnl.toLocaleString(undefined, {maximumFractionDigits:0})} (${usdPnlPct >= 0 ? '+' : ''}${usdPnlPct.toFixed(2)}%)`;
+    document.getElementById('twdPnl').innerHTML = `
+      <div>持倉損益 ${twdPnl>=0?'+':''}NT$${Math.round(twdPnl).toLocaleString()} <span style="color:${twdPnlPct>=0?'#1a7a52':'#d63b3b'}">(${twdPnlPct>=0?'+':''}${twdPnlPct.toFixed(2)}%)</span></div>
+      ${hasMarginTW ? `<div style="font-size:11px;color:#9a6200;margin-top:2px">💰 資金報酬 <strong>${twdCapitalPct>=0?'+':''}${twdCapitalPct.toFixed(2)}%</strong>（自備款獲利）</div>` : ''}
+    `;
+    document.getElementById('usdValue').textContent = `$${usdValue.toLocaleString(undefined,{maximumFractionDigits:0})}`;
+    document.getElementById('usdPnl').innerHTML = `
+      <div>持倉損益 ${usdPnl>=0?'+':''}$${usdPnl.toLocaleString(undefined,{maximumFractionDigits:0})} <span style="color:${usdPnlPct>=0?'#1a7a52':'#d63b3b'}">(${usdPnlPct>=0?'+':''}${usdPnlPct.toFixed(2)}%)</span></div>
+      ${hasMarginUS ? `<div style="font-size:11px;color:#9a6200;margin-top:2px">💰 資金報酬 <strong>${usdCapitalPct>=0?'+':''}${usdCapitalPct.toFixed(2)}%</strong>（自備款獲利）</div>` : ''}
+    `;
 
     await loadAlerts();
 
@@ -769,7 +781,6 @@ async function loadDashboard(refreshPrices = false) {
       return;
     }
 
-    // 台股美股分組顯示
     const twHoldings = holdings.filter(h => h.market === 'tw');
     const usHoldings = holdings.filter(h => h.market === 'us');
     let html = '';
@@ -849,6 +860,7 @@ function renderHoldingCard(h) {
       </div>
       <div class="sright">
         <div class="pnl ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%</div>
+        ${h.margin && h.own_cost ? `<div style="font-size:12px;font-weight:700;color:#9a6200;margin-top:1px">💰 ${h.margin_pnl_pct >= 0 ? '+' : ''}${(h.margin_pnl_pct||0).toFixed(1)}% 資金報酬</div>` : ''}
         <div style="font-size:13px;font-weight:700;color:${pnl>=0?'#1a7a52':'#d63b3b'};margin-top:2px">
           ${pnl >= 0 ? '+' : ''}${h.market==='tw'?'NT$':'$'}${Math.abs(Math.round((h.market_value||0)-(h.cost||0))).toLocaleString()}
         </div>
