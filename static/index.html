@@ -461,11 +461,11 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <div id="marginDetail" style="display:none;background:#fff8ec;border-radius:10px;padding:10px 12px;border:1px solid #f5d48c">
         <div style="font-size:12px;color:#9a6200;margin-bottom:8px">融資成數（自備款比例）</div>
         <div style="display:flex;gap:8px">
-          <button onclick="setMarginRatio(0.6)" id="mr60" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer;transition:all 0.15s">四成自備<br><span style="font-weight:700">融六成</span></button>
-          <button onclick="setMarginRatio(0.5)" id="mr50" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer;transition:all 0.15s">五成自備<br><span style="font-weight:700">融五成</span></button>
-          <button onclick="setMarginRatio(0.4)" id="mr40" style="flex:1;padding:6px;border-radius:8px;border:1.5px solid #f5d48c;background:#fff8ec;color:#9a6200;font-size:12px;cursor:pointer;transition:all 0.15s">六成自備<br><span style="font-weight:700">融四成</span></button>
+          <button onclick="setMarginRatio(0.6)" id="mr60" style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer;transition:all 0.15s;font-weight:500">四成自備<br><span style="font-weight:700;font-size:13px">融六成</span></button>
+          <button onclick="setMarginRatio(0.5)" id="mr50" style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer;transition:all 0.15s;font-weight:500">五成自備<br><span style="font-weight:700;font-size:13px">融五成</span></button>
+          <button onclick="setMarginRatio(0.4)" id="mr40" style="flex:1;padding:8px 6px;border-radius:10px;border:1.5px solid #e8e8e4;background:#fff;font-size:12px;cursor:pointer;transition:all 0.15s;font-weight:500">六成自備<br><span style="font-weight:700;font-size:13px">融四成</span></button>
         </div>
-        <input type="hidden" id="m-margin-ratio" value="0.4">
+        <input type="hidden" id="m-margin-ratio" value="0.6">
         <div id="marginCalc" style="font-size:12px;color:#9a6200;margin-top:8px;text-align:center"></div>
       </div>
     </div>
@@ -849,7 +849,10 @@ function renderHoldingCard(h) {
       </div>
       <div class="sright">
         <div class="pnl ${pnl >= 0 ? 'up' : 'dn'}">${pnl >= 0 ? '+' : ''}${pnl.toFixed(1)}%</div>
-        <div class="pnl-sub" style="font-size:13px;font-weight:600;color:#1a1a1a;margin-top:2px">現價 $${h.current_price || '—'}</div>
+        <div style="font-size:13px;font-weight:700;color:${pnl>=0?'#1a7a52':'#d63b3b'};margin-top:2px">
+          ${pnl >= 0 ? '+' : ''}${h.market==='tw'?'NT$':'$'}${Math.abs(Math.round((h.market_value||0)-(h.cost||0))).toLocaleString()}
+        </div>
+        <div class="pnl-sub" style="font-size:12px;font-weight:600;color:#1a1a1a;margin-top:2px">現價 $${h.current_price || '—'}</div>
         <div class="pnl-sub">市值 $${Math.round(h.market_value||0).toLocaleString()}</div>
         <div style="margin-top:4px;display:flex;gap:4px;justify-content:flex-end">
           ${statusBadge}
@@ -966,6 +969,8 @@ function openAddHolding() {
   document.getElementById('marginDetail').style.display = 'none';
   setMarket('tw');
   document.getElementById('addModal').classList.add('open');
+  // 初始化融資按鈕預設四成自備融六成
+  setTimeout(() => setMarginRatio(0.6), 50);
 }
 function closeModal() { document.getElementById('addModal').classList.remove('open'); }
 
@@ -1033,16 +1038,20 @@ function setMarginRatio(ratio) {
     if(btn) {
       btn.style.background = '#fff';
       btn.style.borderColor = '#e8e8e4';
+      btn.style.transform = 'translateY(0)';
+      btn.style.boxShadow = 'none';
       btn.style.color = '#333';
     }
   });
-  // ratio = 自備款比例：0.4=四成自備(融六成), 0.5=五成自備(融五成), 0.6=六成自備(融四成)
-  const btnId = ratio===0.4?'mr60':ratio===0.5?'mr50':'mr40';
+  // ratio = 自備比例：0.6=四成自備融六成, 0.5=五成自備融五成, 0.4=六成自備融四成
+  const btnId = ratio===0.6?'mr60':ratio===0.5?'mr50':'mr40';
   const btn = document.getElementById(btnId);
   if(btn) {
-    btn.style.background = '#fff8ec';
-    btn.style.borderColor = '#c97c0a';
-    btn.style.color = '#9a6200';
+    btn.style.background = '#fff';
+    btn.style.borderColor = '#1a7a52';
+    btn.style.transform = 'translateY(-3px)';
+    btn.style.boxShadow = '0 4px 12px rgba(26,122,82,0.25)';
+    btn.style.color = '#1a7a52';
   }
   updateMarginCalc();
 }

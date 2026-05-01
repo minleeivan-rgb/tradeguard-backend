@@ -26,6 +26,14 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
 
         if refresh_prices:
             live = get_stock_data(h["ticker"], h["market"])
+            if not live and h["market"] == "tw":
+                # yfinance 抓不到時用 TWSE 每日資料補
+                from services.twse import _twse_cache
+                perf = _twse_cache.get("performance", {})
+                if h["ticker"] in perf:
+                    p = perf[h["ticker"]]
+                    live = {"current_price": p["current_price"], "highest_price": p["current_price"],
+                            "ma20": None, "ma60": None, "ma20_diff_pct": None, "ma60_diff_pct": None}
             if live:
                 current = live["current_price"]
                 highest = max(live["highest_price"], h.get("highest_price", 0))
