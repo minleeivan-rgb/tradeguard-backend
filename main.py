@@ -16,6 +16,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """啟動時預載 TWSE 全股票清單（1700+），確保搜尋永遠有資料"""
+    try:
+        from services.twse import fetch_twse_industry_map
+        industry_map, stock_names = await fetch_twse_industry_map()
+        print(f"[Startup] 預載完成：{len(stock_names)} 支股票")
+    except Exception as e:
+        print(f"[Startup] 預載失敗（不影響服務）：{e}")
+
 from routers.holdings    import router as holdings_router
 from routers.scan        import router as scan_router
 from routers.reviews     import router as reviews_router
