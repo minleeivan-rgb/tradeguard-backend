@@ -4,7 +4,13 @@ import httpx
 from datetime import datetime, timezone, timedelta
 
 def get_yf_ticker(ticker: str, market: str) -> str:
-    return f"{ticker}.TW" if market == "tw" else ticker
+    if market != "tw":
+        return ticker
+    return f"{ticker}.TW"
+
+def get_yf_ticker_with_fallback(ticker: str) -> list:
+    """回傳台股可能的 yfinance ticker 清單（先試上市.TW，再試上櫃.TWO）"""
+    return [f"{ticker}.TW", f"{ticker}.TWO"]
 
 def is_tw_trading_hours() -> bool:
     """判斷現在是否為台股交易時間（台灣時間 09:00-13:35，週一至週五）"""
@@ -45,30 +51,31 @@ def calculate_ma(prices: pd.Series, period: int):
     return round(prices.tail(period).mean(), 2)
 
 def get_stock_data(ticker: str, market: str) -> dict:
-    yf_ticker = get_yf_ticker(ticker, market)
-    try:
-        stock = yf.Ticker(yf_ticker)
-        hist = stock.history(period="6mo")
-        if hist.empty:
-            return None
-        closes = hist["Close"]
-        current_price = round(float(closes.iloc[-1]), 2)
-        highest_price = round(float(closes.max()), 2)
-        ma20 = calculate_ma(closes, 20)
-        ma60 = calculate_ma(closes, 60)
-        ma20_diff = round((current_price - ma20) / ma20 * 100, 2) if ma20 else None
-        ma60_diff = round((current_price - ma60) / ma60 * 100, 2) if ma60 else None
-        return {
-            "current_price": current_price,
-            "highest_price": highest_price,
-            "ma20": ma20,
-            "ma60": ma60,
-            "ma20_diff_pct": ma20_diff,
-            "ma60_diff_pct": ma60_diff,
-        }
-    except Exception as e:
-        print(f"Error fetching {yf_ticker}: {e}")
-        return None
+    tickers_to_try = get_yf_ticker_with_fallback(ticker) if market == "tw" else [ticker]
+    for yf_ticker in tickers_to_try:
+        try:
+            stock = yf.Ticker(yf_ticker)
+            hist = stock.history(period="6mo")
+            if hist.empty:
+                continue
+            closes = hist["Close"]
+            current_price = round(float(closes.iloc[-1]), 2)
+            highest_price = round(float(closes.max()), 2)
+            ma20 = calculate_ma(closes, 20)
+            ma60 = calculate_ma(closes, 60)
+            ma20_diff = round((current_price - ma20) / ma20 * 100, 2) if ma20 else None
+            ma60_diff = round((current_price - ma60) / ma60 * 100, 2) if ma60 else None
+            return {
+                "current_price": current_price,
+                "highest_price": highest_price,
+                "ma20": ma20, "ma60": ma60,
+                "ma20_diff_pct": ma20_diff,
+                "ma60_diff_pct": ma60_diff,
+            }
+        except Exception as e:
+            print(f"Error fetching {yf_ticker}: {e}")
+            continue
+    return None
 
 def calculate_technical_indicators(ticker: str, market: str) -> dict:
     yf_ticker = get_yf_ticker(ticker, market)

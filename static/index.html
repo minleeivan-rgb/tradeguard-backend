@@ -359,8 +359,16 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
 
         <!-- 四個分類分開顯示 -->
         <div id="rules-entry" style="margin-bottom:16px">
-          <div style="font-size:11px;font-weight:700;color:#2563eb;letter-spacing:0.06em;margin-bottom:8px">📈 進場條件</div>
+          <div style="font-size:11px;font-weight:700;color:#2563eb;letter-spacing:0.06em;margin-bottom:8px">📈 進場條件（通用）</div>
           <div id="rules-entry-list"></div>
+        </div>
+        <div id="rules-tw_entry" style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:#2563eb;letter-spacing:0.06em;margin-bottom:8px">🇹🇼 台股專用進場</div>
+          <div id="rules-tw_entry-list"></div>
+        </div>
+        <div id="rules-us_entry" style="margin-bottom:16px">
+          <div style="font-size:11px;font-weight:700;color:#7c3aed;letter-spacing:0.06em;margin-bottom:8px">🇺🇸 美股專用進場</div>
+          <div id="rules-us_entry-list"></div>
         </div>
         <div id="rules-stoploss" style="margin-bottom:16px">
           <div style="font-size:11px;font-weight:700;color:#d63b3b;letter-spacing:0.06em;margin-bottom:8px">🛑 停損條件</div>
@@ -395,7 +403,9 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
     <div class="field">
       <div class="field-label">規則分類</div>
       <select id="r-category">
-        <option value="entry">📈 進場條件</option>
+        <option value="entry">📈 進場條件（通用）</option>
+        <option value="tw_entry">🇹🇼 台股專用進場</option>
+        <option value="us_entry">🇺🇸 美股專用進場</option>
         <option value="stoploss">🛑 停損條件</option>
         <option value="takeprofit">💰 停利條件</option>
         <option value="mindset">🧠 心理與紀律</option>
@@ -495,6 +505,8 @@ const CAT_CONFIG = {
   stoploss:   {label:'🛑 停損條件',   color:'#d63b3b'},
   takeprofit: {label:'💰 停利條件',   color:'#1a7a52'},
   mindset:    {label:'🧠 心理與紀律', color:'#c97c0a'},
+  tw_entry:   {label:'🇹🇼 台股專用進場', color:'#2563eb'},
+  us_entry:   {label:'🇺🇸 美股專用進場', color:'#7c3aed'},
 };
 
 const DEFAULT_RULES = {
@@ -518,7 +530,16 @@ const DEFAULT_RULES = {
     {title:"被洗出不當天追", content:"被強勢股洗出後，不在當天追高，等回測起漲點+量縮2-3天確認再進"},
     {title:"不加碼攤平", content:"持倉虧損時絕對不加碼攤平，只在獲利時才考慮加碼"},
     {title:"不看盤不操作", content:"沒有明確進出場訊號時，不因為看盤心癢而頻繁操作"},
-  ]
+  ],
+  tw_entry: [
+    {title:"台股動能進場", content:"台股追強勢動能股：必須在強勢族群前三名，成交量爆增，當日漲幅超過3%才考慮進場"},
+    {title:"漲停前一天跡象", content:"觀察前一天是否出現量增、長紅K、突破區間等強力訊號再進場"},
+  ],
+  us_entry: [
+    {title:"美股趨勢進場", content:"美股中長期持有策略：不看單日成交量，只看月線季線多頭排列、基本面題材明確"},
+    {title:"美股KD不適用高標", content:"美股大型股KD長期在高位屬正常，不以KD>80排除進場"},
+    {title:"財報前後策略", content:"財報前兩週考慮減倉或觀望，財報後確認趨勢再加碼"},
+  ],
 };
 
 // ==================== Auth ====================
