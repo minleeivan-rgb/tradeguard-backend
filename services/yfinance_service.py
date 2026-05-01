@@ -1,8 +1,43 @@
 import yfinance as yf
 import pandas as pd
+import httpx
+from datetime import datetime, timezone, timedelta
 
 def get_yf_ticker(ticker: str, market: str) -> str:
     return f"{ticker}.TW" if market == "tw" else ticker
+
+def is_tw_trading_hours() -> bool:
+    """判斷現在是否為台股交易時間（台灣時間 09:00-13:35，週一至週五）"""
+    tw_tz = timezone(timedelta(hours=8))
+    now = datetime.now(tw_tz)
+    if now.weekday() >= 5:  # 週六日
+        return False
+    t = now.hour * 100 + now.minute
+    return 900 <= t <= 1335
+
+async def get_tw_realtime_price(ticker: str) -> dict | None:
+    """盤中用 TWSE MIS API 取得即時價格"""
+    try:
+        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{ticker}.tw&json=1&delay=0"
+        async with httpx.AsyncClient(timeout=5, verify=False) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = r.json()
+        msg = data.get("msgArray", [])
+        if not msg:
+            # 試 OTC（上櫃）
+            url2 = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{ticker}.tw&json=1&delay=0"
+            async with httpx.AsyncClient(timeout=5, verify=False) as client:
+                r2 = await client.get(url2, headers={"User-Agent": "Mozilla/5.0"})
+            data2 = r2.json()
+            msg = data2.get("msgArray", [])
+        if msg:
+            item = msg[0]
+            price = float(item.get("z", item.get("y", 0)) or 0)
+            if price > 0:
+                return {"current_price": price, "source": "realtime"}
+    except:
+        pass
+    return None
 
 def calculate_ma(prices: pd.Series, period: int):
     if len(prices) < period:

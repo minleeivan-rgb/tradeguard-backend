@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from database import db
 from models import Review, AIReviewRequest
-from services.yfinance_service import calculate_technical_indicators
+from services.yfinance_service import calculate_technical_indicators, is_tw_trading_hours, get_tw_realtime_price
 from services.ai import call_claude
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
@@ -15,6 +15,18 @@ def fix_id(doc):
 @router.post("/ai")
 async def ai_review(req: AIReviewRequest):
     tech = calculate_technical_indicators(req.ticker, req.market)
+
+    # 盤中用即時價格覆蓋 yfinance 的延遲價
+    if req.market == "tw" and is_tw_trading_hours():
+        import asyncio
+        realtime = await get_tw_realtime_price(req.ticker)
+        if realtime and tech:
+            tech["current_price"] = realtime["current_price"]
+            tech["price_source"] = "即時"
+        elif tech:
+            tech["price_source"] = "15分延遲"
+    elif tech:
+        tech["price_source"] = "收盤價"
 
     custom_rules = []
     async for r in db.custom_rules.find({"user_id": req.user_id}):
@@ -121,9 +133,13 @@ async def ai_review(req: AIReviewRequest):
                   "pass" if "[通過]" in text else "hold"
 
         # 加上分析時間和股價標頭
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        price_str = f"${tech['current_price']}" if tech else "無法取得"
-        header = f"📊 分析時間：{now_str}　｜　分析當下股價：{price_str}\n{'─'*40}\n\n"
+        from datetime import timezone, timedelta
+        tw_tz = timezone(timedelta(hours=8))
+        now_tw = datetime.now(tw_tz)
+        now_str = now_tw.strftime("%Y-%m-%d %H:%M")
+        price_source = tech.get("price_source", "") if tech else ""
+        price_str = f"${tech['current_price']}（{price_source}）" if tech else "無法取得"
+        header = f"📊 分析時間：{now_str}（台灣時間）　｜　股價：{price_str}\n{'─'*40}\n\n"
         text_with_header = header + text
         await db.reviews.insert_one({
             "user_id": req.user_id, "type": req.type, "ticker": req.ticker,
