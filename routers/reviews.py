@@ -56,12 +56,15 @@ async def ai_review(req: AIReviewRequest):
 - 技術面方向：{tech['direction']}
 """
         checked_rules = inputs.get('checked_rules', [])
-        rules_by_cat = {'entry':[], 'stoploss':[], 'takeprofit':[], 'mindset':[]}
+        rules_by_cat = {'entry':[], 'tw_entry':[], 'us_entry':[], 'stoploss':[], 'takeprofit':[], 'mindset':[]}
         for r in checked_rules:
             cat = r.get('category', 'entry')
             rules_by_cat.setdefault(cat, []).append(f"【{r['title']}】{r['content']}")
 
-        cat_names = {'entry':'進場條件', 'stoploss':'停損條件', 'takeprofit':'停利條件', 'mindset':'心理與紀律'}
+        cat_names = {
+            'entry':'進場條件', 'tw_entry':'台股專用進場', 'us_entry':'美股專用進場',
+            'stoploss':'停損條件', 'takeprofit':'停利條件', 'mindset':'心理與紀律'
+        }
         rules_section = ""
         for cat, rlist in rules_by_cat.items():
             if rlist:
