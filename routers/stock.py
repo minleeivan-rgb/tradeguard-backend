@@ -61,10 +61,18 @@ TW_STOCK_FALLBACK = {
 async def search_stock(q: str, market: str = "tw"):
     if market == "tw":
         q = q.strip()
-        results = []
-        seen = set()
 
-        # 1. 先查 TWSE 快取（每日掃描後有 1700+）
+        # 1. FinMind 搜尋（最完整，含上市上櫃興櫃）
+        try:
+            from services.finmind import search_tw_stock
+            results = await search_tw_stock(q)
+            if results:
+                return results[:10]
+        except Exception as e:
+            print(f"FinMind search failed: {e}")
+
+        # 2. TWSE 快取備用
+        results, seen = [], set()
         cached_names = _twse_cache.get("stock_names", {})
         for code, name in cached_names.items():
             if q in code or q in name:
@@ -73,35 +81,14 @@ async def search_stock(q: str, market: str = "tw"):
                 if len(results) >= 8:
                     break
 
-        # 2. 補查靜態清單
+        # 3. 靜態清單備用
         for code, name in TW_STOCK_FALLBACK.items():
             if code not in seen and (q in code or q in name):
                 results.append({"ticker": code, "name": name, "market": "tw"})
-                seen.add(code)
-
-        # 3. 都找不到 → 查 TWSE openapi（全量搜尋）
-        if not results:
-            try:
-                async with httpx.AsyncClient(timeout=8, verify=False) as client:
-                    r = await client.get(
-                        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
-                        headers={"User-Agent": "Mozilla/5.0"}
-                    )
-                stocks = r.json()
-                for s in stocks:
-                    code = s.get("Code", "")
-                    name = s.get("Name", "")
-                    if q in code or q in name:
-                        results.append({"ticker": code, "name": name, "market": "tw"})
-                        if len(results) >= 10:
-                            break
-            except:
-                pass
 
         if results:
             return results[:10]
 
-        # 4. 最後 fallback：只有純代號才當 ticker，不然提示找不到
         if q.isdigit():
             return [{"ticker": q, "name": f"代號 {q}", "market": "tw"}]
 
@@ -109,6 +96,11 @@ async def search_stock(q: str, market: str = "tw"):
 
 @router.get("/{market}/{ticker}")
 async def get_stock_info(market: str, ticker: str):
+    if market == "tw":
+        from services.finmind import get_tw_stock_price
+        data = await get_tw_stock_price(ticker)
+        if data:
+            return data
     data = get_stock_data(ticker, market)
     if not data:
         raise HTTPException(status_code=404, detail=f"找不到 {ticker}")
@@ -116,6 +108,11 @@ async def get_stock_info(market: str, ticker: str):
 
 @router.get("/{market}/{ticker}/analysis")
 async def get_technical_analysis(market: str, ticker: str):
+    if market == "tw":
+        from services.finmind import get_tw_technical
+        data = await get_tw_technical(ticker)
+        if data:
+            return data
     data = calculate_technical_indicators(ticker, market)
     if not data:
         raise HTTPException(status_code=404, detail=f"無法分析 {ticker}")

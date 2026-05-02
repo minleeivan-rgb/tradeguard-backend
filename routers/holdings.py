@@ -3,7 +3,7 @@ from bson import ObjectId
 from datetime import datetime
 from database import db
 from models import Holding, HoldingUpdate, NoteUpdate
-from services.yfinance_service import get_stock_data, calculate_status
+from services.yfinance_service import get_stock_data, calculate_status, is_tw_trading_hours
 
 router = APIRouter(prefix="/holdings", tags=["holdings"])
 
@@ -25,9 +25,18 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
         h = fix_id(h)
 
         if refresh_prices:
-            live = get_stock_data(h["ticker"], h["market"])
-            if not live and h["market"] == "tw":
-                # yfinance 抓不到時用 TWSE 每日資料補
+            if h["market"] == "tw":
+                from services.finmind import get_tw_stock_price
+                live = await get_tw_stock_price(h["ticker"])
+                # 盤中補即時價
+                if live and is_tw_trading_hours():
+                    from services.yfinance_service import get_tw_realtime_price
+                    rt = await get_tw_realtime_price(h["ticker"])
+                    if rt:
+                        live["current_price"] = rt["current_price"]
+            else:
+                live = get_stock_data(h["ticker"], h["market"])
+            if not live:
                 from services.twse import _twse_cache
                 perf = _twse_cache.get("performance", {})
                 if h["ticker"] in perf:

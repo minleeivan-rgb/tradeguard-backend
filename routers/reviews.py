@@ -14,19 +14,24 @@ def fix_id(doc):
 
 @router.post("/ai")
 async def ai_review(req: AIReviewRequest):
-    tech = calculate_technical_indicators(req.ticker, req.market)
-
-    # 盤中用即時價格覆蓋 yfinance 的延遲價
-    if req.market == "tw" and is_tw_trading_hours():
-        import asyncio
-        realtime = await get_tw_realtime_price(req.ticker)
-        if realtime and tech:
-            tech["current_price"] = realtime["current_price"]
-            tech["price_source"] = "即時"
+    # 技術分析（台股用 FinMind，美股用 yfinance）
+    if req.market == "tw":
+        from services.finmind import get_tw_technical, get_tw_stock_price
+        tech = await get_tw_technical(req.ticker)
+        # 盤中用即時價格
+        if tech and is_tw_trading_hours():
+            realtime = await get_tw_realtime_price(req.ticker)
+            if realtime:
+                tech["current_price"] = realtime["current_price"]
+                tech["price_source"] = "即時"
+            else:
+                tech["price_source"] = "收盤價"
         elif tech:
-            tech["price_source"] = "15分延遲"
-    elif tech:
-        tech["price_source"] = "收盤價"
+            tech["price_source"] = "收盤價"
+    else:
+        tech = calculate_technical_indicators(req.ticker, req.market)
+        if tech:
+            tech["price_source"] = "yfinance"
 
     custom_rules = []
     async for r in db.custom_rules.find({"user_id": req.user_id}):
