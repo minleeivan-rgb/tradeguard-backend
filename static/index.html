@@ -266,7 +266,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
                 <input type="text" id="b-search" placeholder="例：台積電 / 2330 / NVDA" oninput="searchReviewStock(this.value)" autocomplete="off">
                 <div id="b-searchDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e8e8e4;border-radius:10px;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto"></div>
               </div>
-              <select id="b-market" style="width:80px"><option value="tw">台股</option><option value="us">美股</option></select>
+              <select id="b-market" style="width:80px" onchange="loadReviewRules()"><option value="tw">台股</option><option value="us">美股</option></select>
             </div>
             <input type="hidden" id="b-ticker">
             <div id="b-selectedStock" style="display:none;background:#e8f5ee;border-radius:8px;padding:6px 12px;margin-top:6px;font-size:13px;color:#1a7a52;font-weight:600"></div>
@@ -275,18 +275,46 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
           <button onclick="fetchAnalysis()" style="width:100%;padding:10px;background:#f8f8f5;color:#1a7a52;border:1.5px solid #1a7a52;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px">📊 分析技術面 →</button>
           <div id="analysisBox" style="display:none"></div>
 
+          <!-- 進場規則勾選（只顯示對應市場） -->
           <div class="field">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-              <div class="field-label" style="margin-bottom:0">勾選這次要遵守的規則</div>
+              <div class="field-label" style="margin-bottom:0">✅ 進場規則核查（必須全部達標）</div>
               <button onclick="loadReviewRules()" style="font-size:11px;color:#1a7a52;background:none;border:none;cursor:pointer">重新載入</button>
             </div>
             <div id="reviewRulesArea"><div style="font-size:12px;color:#aaa;text-align:center;padding:12px"><span class="spinner"></span> 載入中...</div></div>
-            <div style="font-size:11px;color:#aaa;margin-top:8px">⚠ 勾選的規則 AI 逐條核查，有衝突 → 審慎評估，不達標 → 直接不通過</div>
+            <div style="font-size:11px;color:#aaa;margin-top:6px">⚠ 不符合任一條 → 直接不通過</div>
           </div>
 
+          <!-- 進場理由 -->
           <div class="field">
             <div class="field-label">你看到的故事是什麼？</div>
             <textarea id="b-story" rows="3" placeholder="例：AI 晶片需求爆發，CoWoS 為唯一供應商，法說會剛上調財測..."></textarea>
+          </div>
+
+          <!-- 停損設定（必填） -->
+          <div class="field">
+            <div class="field-label">🛑 這次停損設在哪裡？<span style="color:#d63b3b;font-size:11px"> 必填</span></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+              <button onclick="setStop('跌破季線出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">跌破季線</button>
+              <button onclick="setStop('跌破月線出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">跌破月線</button>
+              <button onclick="setStop('虧損 5% 出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">虧損 5%</button>
+              <button onclick="setStop('虧損 7% 出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">虧損 7%</button>
+              <button onclick="setStop('虧損 10% 出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">虧損 10%</button>
+            </div>
+            <input type="text" id="b-stop" placeholder="或自己輸入，例：跌破 380 停損">
+          </div>
+
+          <!-- 目標設定（必填） -->
+          <div class="field">
+            <div class="field-label">💰 這次目標設在哪裡？<span style="color:#d63b3b;font-size:11px"> 必填</span></div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+              <button onclick="setTarget('高點回檔 20% 停利')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">回檔 20%</button>
+              <button onclick="setTarget('目標獲利 20%')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">+20%</button>
+              <button onclick="setTarget('目標獲利 30%')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">+30%</button>
+              <button onclick="setTarget('目標獲利 50%')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">+50%</button>
+              <button onclick="setTarget('題材結束出場')" style="padding:5px 10px;border-radius:8px;border:1px solid #e8e8e4;background:#f8f8f5;font-size:12px;cursor:pointer;color:#666">題材結束</button>
+            </div>
+            <input type="text" id="b-target" placeholder="或自己輸入，例：目標 500，分批出場">
           </div>
 
           <button class="btn-main" id="buyBtn" onclick="doReview('buy')">送出 AI 審核</button>
@@ -689,6 +717,13 @@ async function loadCustomRules() {
 async function loadReviewRules() {
   const area = document.getElementById('reviewRulesArea');
   if(!area) return;
+  const market = document.getElementById('b-market')?.value || 'tw';
+
+  // 只顯示進場類規則（通用 + 對應市場專用）
+  const entryCategories = market === 'tw'
+    ? ['entry', 'tw_entry']
+    : ['entry', 'us_entry'];
+
   let userRules = [];
   try {
     const res = await fetch(`${API_BASE}/users/${USER_ID}/custom-rules`);
@@ -696,7 +731,9 @@ async function loadReviewRules() {
   } catch {}
 
   let html = '';
-  for(const [cat, cfg] of Object.entries(CAT_CONFIG)) {
+  for(const cat of entryCategories) {
+    const cfg = CAT_CONFIG[cat];
+    if(!cfg) continue;
     const defaults = DEFAULT_RULES[cat] || [];
     const customs  = userRules.filter(r => r.category === cat);
     const all = [
@@ -715,14 +752,14 @@ async function loadReviewRules() {
               data-category="${cat}"
               style="margin-top:2px;accent-color:${cfg.color};width:15px;height:15px;flex-shrink:0">
             <div>
-              <div style="font-size:13px;font-weight:600;color:#1a1a1a">${r.title} ${r.isDefault ? '<span style="font-size:10px;color:#bbb;font-weight:400">預設</span>' : ''}</div>
+              <div style="font-size:13px;font-weight:600;color:#1a1a1a">${r.title} ${r.isDefault ? '<span style="font-size:10px;color:#bbb">預設</span>' : ''}</div>
               <div style="font-size:11px;color:#888;margin-top:1px;line-height:1.4">${(r.content||'').length > 60 ? r.content.slice(0,60)+'...' : r.content}</div>
             </div>
           </label>`).join('')}
       </div>
     </div>`;
   }
-  area.innerHTML = html || '<div style="font-size:12px;color:#aaa;text-align:center;padding:12px">沒有規則，去設定頁新增！</div>';
+  area.innerHTML = html || '<div style="font-size:12px;color:#aaa;text-align:center;padding:12px">去設定頁新增進場規則！</div>';
 }
 
 // ==================== API ====================
@@ -1396,6 +1433,8 @@ async function doReview(type) {
 
     inputs = {
       story: document.getElementById('b-story').value || '（未填）',
+      stop: document.getElementById('b-stop').value || '（未填）',
+      target: document.getElementById('b-target').value || '（未填）',
       checked_rules: checkedRules
     };
   } else {

@@ -61,61 +61,58 @@ async def ai_review(req: AIReviewRequest):
             cat = r.get('category', 'entry')
             rules_by_cat.setdefault(cat, []).append(f"【{r['title']}】{r['content']}")
 
-        cat_names = {
-            'entry':'進場條件', 'tw_entry':'台股專用進場', 'us_entry':'美股專用進場',
-            'stoploss':'停損條件', 'takeprofit':'停利條件', 'mindset':'心理與紀律'
-        }
-        rules_section = ""
+        entry_cats = {'entry', 'tw_entry', 'us_entry'}
+        entry_rules = []
+        advisory_rules = []
         for cat, rlist in rules_by_cat.items():
-            if rlist:
-                rules_section += f"\n{cat_names[cat]}：\n" + "\n".join(f"  - {r}" for r in rlist) + "\n"
+            if cat in entry_cats:
+                entry_rules.extend(rlist)
+            else:
+                advisory_rules.extend(rlist)
 
-        if not rules_section:
-            rules_section = "（用戶這次沒有勾選任何規則）"
+        entry_section = "\n".join(f"  - {r}" for r in entry_rules) if entry_rules else "（未勾選進場規則）"
+        advisory_section = "\n".join(f"  - {r}" for r in advisory_rules) if advisory_rules else "（無）"
 
         prompt = f"""你是一個嚴格的交易紀律夥伴，同時也是有豐富經驗的技術分析師。
 
 股票：{req.ticker}（{req.market.upper()}）
-進場故事/題材：{inputs.get('story','（未填）')}
-技術面補充：{inputs.get('tech','（未填）')}
+進場理由：{inputs.get('story','（未填）')}
 停損計畫：{inputs.get('stop','（未填）')}
-目標與退場條件：{inputs.get('target','（未填）')}
+目標與退場：{inputs.get('target','（未填）')}
 
 {tech_summary}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-用戶這次勾選要遵守的規則：
-{rules_section}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━ 用戶這次的進場規則（必須全部達標，否則直接不通過）━━━
+{entry_section}
 
-請以繁體中文，嚴格按照以下架構回覆：
+━━━ 用戶的背景規則（AI 參考用，不作為否決條件）━━━
+{advisory_section}
 
-【第一部分：規則核查】
-針對用戶勾選的每條規則，逐一判定：
-格式：✅ 符合 或 ❌ 不符合（附一句說明）
+請以繁體中文，按以下架構回覆：
 
-{"（沒有勾選規則，跳過此部分）" if not checked_rules else ""}
+【進場規則核查】
+針對每條進場規則逐一判定：
+✅ 符合 或 ❌ 不符合（一句話說明）
+核查結論：X/{len(entry_rules)} 條通過
 
-規則核查結論：X/{len(checked_rules)} 條通過
-
-【第二部分：AI 技術觀察與衝突偵測】
+【AI 技術觀察】
 - 日線動能：
 - 月線/季線：
 - KD/RSI：
 - MACD：
 - 成交量：
+- 停損合理性：（評估用戶設定的停損是否合理）
+- 目標合理性：（評估用戶設定的目標是否合理）
 - 你可能沒注意到的風險：
-- ⚠ 與你規則的衝突點：（若 AI 觀察到用戶規則雖然表面達標，但技術面有矛盾的地方，在這裡列出）
+- ⚠ 與進場規則的潛在衝突：
 
 【最終裁決】
-裁決邏輯（一票否決制）：
-- 有任何規則 ❌ → 強制 [不通過]
-- 規則全 ✅ 但 AI 發現明顯衝突 → [審慎評估]（列出衝突）
-- 規則全 ✅ 且 AI 觀察正面 → [通過]
-- 沒有勾選規則 → 純技術面判斷
+規則：有任何進場規則 ❌ → [不通過]
+     進場規則全 ✅ 但 AI 有重大疑慮 → [審慎評估]
+     進場規則全 ✅ 且 AI 觀察正面 → [通過]
 
 結論：[不通過] / [審慎評估] / [通過]
-一句話說明理由。語氣直接，像嚴格但真心幫助的交易導師。"""
+一句話說明。語氣直接像嚴格的交易導師。"""
     else:
         prompt = f"""你是一個嚴格的交易紀律夥伴。用戶想賣出 {req.ticker}，賣出理由如下：
 
