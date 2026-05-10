@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter
 from datetime import datetime
 from services.twse import fetch_twse_industry_map, fetch_twse_stock_performance
@@ -174,7 +175,8 @@ async def scan_tw():
 async def scan_us():
     results = []
     for name, tickers in US_SECTORS.items():
-        r = scan_sector_yf(tickers, "us")
+        # FIX: asyncio.to_thread 避免同步 yfinance 阻塞 event loop
+        r = await asyncio.to_thread(scan_sector_yf, tickers, "us")
         results.append({"sector": name, **r})
     results.sort(key=lambda x: x["avg_change_pct"], reverse=True)
     return {"date": datetime.now().strftime("%Y-%m-%d"), "market": "us",
@@ -186,12 +188,14 @@ async def scan_us():
 @router.get("/alerts/{user_id}")
 async def check_alerts(user_id: str):
     from database import db
-    from services.yfinance_service import get_stock_data
-    user  = await db.users.find_one({"name": user_id})
+    from services.yfinance_service import get_stock_data, calculate_status
+    # FIX: 原本 {"name": user_id}，改為 {"email": user_id}
+    user  = await db.users.find_one({"email": user_id})
     rules = user.get("rules", {}) if user else {"profit_trailing_pct": 20, "stoploss_pct": 7}
     alerts = []
     async for h in db.holdings.find({"user_id": user_id}):
-        live = get_stock_data(h["ticker"], h["market"])
+        # FIX: asyncio.to_thread 避免阻塞
+        live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
         if not live:
             continue
         current  = live["current_price"]
@@ -202,10 +206,10 @@ async def check_alerts(user_id: str):
         pt = rules.get("profit_trailing_pct", 20)
         sl = rules.get("stoploss_pct", 7)
         name = h.get("name", h["ticker"])
-        if pnl_pct >= 20 and pullback >= pt:
+        if pnl_pct > 0 and pullback >= pt:
             alerts.append({"type":"profit_alert","ticker":h["ticker"],"name":name,
                            "message":f"從最高點回檔 {pullback}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high"})
-        elif pnl_pct >= 15 and pullback >= pt * 0.8:
+        elif pnl_pct > 0 and pullback >= pt * 0.8:
             alerts.append({"type":"profit_watch","ticker":h["ticker"],"name":name,
                            "message":f"回檔 {pullback}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium"})
         elif pnl_pct <= -sl:

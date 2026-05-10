@@ -1,3 +1,4 @@
+import asyncio
 import yfinance as yf
 import pandas as pd
 import httpx
@@ -16,7 +17,7 @@ def is_tw_trading_hours() -> bool:
     """判斷現在是否為台股交易時間（台灣時間 09:00-13:35，週一至週五）"""
     tw_tz = timezone(timedelta(hours=8))
     now = datetime.now(tw_tz)
-    if now.weekday() >= 5:  # 週六日
+    if now.weekday() >= 5:
         return False
     t = now.hour * 100 + now.minute
     return 900 <= t <= 1335
@@ -30,7 +31,6 @@ async def get_tw_realtime_price(ticker: str) -> dict | None:
         data = r.json()
         msg = data.get("msgArray", [])
         if not msg:
-            # 試 OTC（上櫃）
             url2 = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{ticker}.tw&json=1&delay=0"
             async with httpx.AsyncClient(timeout=5, verify=False) as client:
                 r2 = await client.get(url2, headers={"User-Agent": "Mozilla/5.0"})
@@ -197,11 +197,14 @@ def calculate_status(current_price, entry_price, highest_price, rules) -> str:
     trailing_pct = (highest_price - current_price) / highest_price * 100 if highest_price > 0 else 0
     profit_trigger  = rules.get("profit_trailing_pct", 20)
     stoploss_trigger = rules.get("stoploss_pct", 7)
-    if pnl_pct >= 20 and trailing_pct >= profit_trigger:   return "profit_alert"
-    elif pnl_pct <= -stoploss_trigger:                     return "loss_alert"
-    elif trailing_pct >= profit_trigger * 0.8:             return "watch"
-    elif pnl_pct <= -stoploss_trigger * 0.7:               return "watch"
-    else:                                                  return "ok"
+
+    # FIX: 原本 pnl_pct >= 20 是硬寫的，與 profit_trigger 無關
+    # 改為：只要有獲利且回檔幅度達觸發點即警示
+    if pnl_pct > 0 and trailing_pct >= profit_trigger:    return "profit_alert"
+    elif pnl_pct <= -stoploss_trigger:                    return "loss_alert"
+    elif trailing_pct >= profit_trigger * 0.8:            return "watch"
+    elif pnl_pct <= -stoploss_trigger * 0.7:              return "watch"
+    else:                                                 return "ok"
 
 def scan_sector_yf(tickers: list, market: str) -> dict:
     results = []

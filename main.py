@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -7,17 +8,10 @@ import os
 
 load_dotenv()
 
-app = FastAPI(title="TradeGuard API v2")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.on_event("startup")
-async def startup_event():
+# FIX: @app.on_event("startup") 在 FastAPI 0.93+ 已 deprecated
+#      改用 lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """啟動時預載 TWSE 全股票清單（1700+），確保搜尋永遠有資料"""
     try:
         from services.twse import fetch_twse_industry_map
@@ -25,6 +19,17 @@ async def startup_event():
         print(f"[Startup] 預載完成：{len(stock_names)} 支股票")
     except Exception as e:
         print(f"[Startup] 預載失敗（不影響服務）：{e}")
+    yield
+    # shutdown 時可加清理邏輯（目前無需要）
+
+app = FastAPI(title="TradeGuard API v2", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 from routers.holdings    import router as holdings_router
 from routers.scan        import router as scan_router

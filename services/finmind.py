@@ -1,9 +1,14 @@
 import os
+import time
 import httpx
 from datetime import datetime, timedelta
 
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
 FINMIND_BASE = "https://api.finmindtrade.com/api/v4/data"
+
+# FIX: 加入 TaiwanStockInfo 快取，避免每次搜尋都拉全部股票清單（2000+ 筆）
+_stock_info_cache: dict = {"data": None, "fetched_at": 0.0}
+_STOCK_INFO_TTL = 6 * 3600  # 快取 6 小時
 
 async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: str = None) -> list:
     if not start_date:
@@ -25,13 +30,20 @@ async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: 
     return data.get("data", [])
 
 async def search_tw_stock(q: str) -> list:
-    """搜尋台股代號或名稱"""
+    """搜尋台股代號或名稱（加入快取，TTL 6 小時）"""
+    global _stock_info_cache
     try:
-        params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.get(FINMIND_BASE, params=params)
-        data = r.json()
-        stocks = data.get("data", [])
+        now = time.time()
+        # FIX: 快取過期或首次呼叫才重新 fetch
+        if _stock_info_cache["data"] is None or (now - _stock_info_cache["fetched_at"]) > _STOCK_INFO_TTL:
+            params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(FINMIND_BASE, params=params)
+            raw = r.json()
+            _stock_info_cache["data"] = raw.get("data", [])
+            _stock_info_cache["fetched_at"] = now
+
+        stocks = _stock_info_cache["data"]
         q = q.strip()
         results = []
         for s in stocks:
@@ -54,7 +66,6 @@ async def get_tw_stock_price(stock_id: str) -> dict:
         rows = await fm_get("TaiwanStockPrice", stock_id, start, end)
         if not rows:
             return None
-        # 排序確保最新在後
         rows = sorted(rows, key=lambda x: x["date"])
         closes = [float(r["close"]) for r in rows]
         current = closes[-1]
@@ -82,7 +93,7 @@ async def get_tw_stock_price(stock_id: str) -> dict:
 async def get_tw_technical(stock_id: str) -> dict:
     """用 FinMind 計算台股完整技術指標"""
     import pandas as pd
-    import numpy as np
+    # FIX: 移除未使用的 numpy import
     try:
         data = await get_tw_stock_price(stock_id)
         if not data or len(data["raw_closes"]) < 60:

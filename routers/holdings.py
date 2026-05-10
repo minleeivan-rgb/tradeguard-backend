@@ -1,5 +1,7 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
+from bson.errors import InvalidId
 from datetime import datetime
 from database import db
 from models import Holding, HoldingUpdate, NoteUpdate
@@ -18,13 +20,15 @@ LEVERAGED_KEYWORDS = ["2X","2x","3X","3x","QLD","SSO","UPRO","TQQQ","SOXL","TECL
 @router.get("/{user_id}")
 async def get_holdings(user_id: str, refresh_prices: bool = False):
     holdings = []
-    user  = await db.users.find_one({"name": user_id})
+    # FIX: 原本 {"name": user_id}，改為 {"email": user_id}
+    user  = await db.users.find_one({"email": user_id})
     rules = user.get("rules", {}) if user else {}
 
     async for h in db.holdings.find({"user_id": user_id}):
         h = fix_id(h)
 
         if refresh_prices:
+            live = None
             if h["market"] == "tw":
                 from services.finmind import get_tw_stock_price
                 live = await get_tw_stock_price(h["ticker"])
@@ -35,7 +39,9 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
                     if rt:
                         live["current_price"] = rt["current_price"]
             else:
-                live = get_stock_data(h["ticker"], h["market"])
+                # FIX: get_stock_data 是同步函數，用 asyncio.to_thread 避免阻塞 event loop
+                live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
+
             if not live:
                 from services.twse import _twse_cache
                 perf = _twse_cache.get("performance", {})
@@ -47,14 +53,20 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
                 current = live["current_price"]
                 highest = max(live["highest_price"], h.get("highest_price", 0))
                 status  = calculate_status(current, h["entry_price"], highest, rules)
-                await db.holdings.update_one(
-                    {"_id": ObjectId(h["_id"])},
-                    {"$set": {"current_price": current, "highest_price": highest,
-                              "ma20": live["ma20"], "ma60": live["ma60"],
-                              "ma20_diff_pct": live["ma20_diff_pct"],
-                              "ma60_diff_pct": live["ma60_diff_pct"],
-                              "status": status, "updated_at": datetime.utcnow().isoformat()}}
-                )
+                # FIX: ObjectId 保護
+                try:
+                    oid = ObjectId(h["_id"])
+                except InvalidId:
+                    oid = None
+                if oid:
+                    await db.holdings.update_one(
+                        {"_id": oid},
+                        {"$set": {"current_price": current, "highest_price": highest,
+                                  "ma20": live["ma20"], "ma60": live["ma60"],
+                                  "ma20_diff_pct": live["ma20_diff_pct"],
+                                  "ma60_diff_pct": live["ma60_diff_pct"],
+                                  "status": status, "updated_at": datetime.utcnow().isoformat()}}
+                    )
                 h.update({"current_price": current, "highest_price": highest, "status": status, **live})
 
         if h.get("current_price") and h.get("entry_price"):
@@ -100,7 +112,8 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
 @router.post("")
 async def add_holding(holding: Holding):
     data = holding.dict()
-    live = get_stock_data(holding.ticker, holding.market)
+    # FIX: asyncio.to_thread 避免阻塞
+    live = await asyncio.to_thread(get_stock_data, holding.ticker, holding.market)
     if live:
         data.update(live)
         data["status"] = "ok"
@@ -110,20 +123,35 @@ async def add_holding(holding: Holding):
 
 @router.put("/{holding_id}")
 async def update_holding(holding_id: str, update: HoldingUpdate):
+    # FIX: ObjectId 格式保護
+    try:
+        oid = ObjectId(holding_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="holding_id 格式不正確")
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     update_data["updated_at"] = datetime.utcnow().isoformat()
-    await db.holdings.update_one({"_id": ObjectId(holding_id)}, {"$set": update_data})
+    await db.holdings.update_one({"_id": oid}, {"$set": update_data})
     return {"message": "更新成功"}
 
 @router.delete("/{holding_id}")
 async def delete_holding(holding_id: str):
-    await db.holdings.delete_one({"_id": ObjectId(holding_id)})
+    # FIX: ObjectId 格式保護
+    try:
+        oid = ObjectId(holding_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="holding_id 格式不正確")
+    await db.holdings.delete_one({"_id": oid})
     return {"message": "持倉刪除成功"}
 
 @router.put("/{holding_id}/note")
 async def update_note(holding_id: str, body: NoteUpdate):
+    # FIX: ObjectId 格式保護
+    try:
+        oid = ObjectId(holding_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="holding_id 格式不正確")
     await db.holdings.update_one(
-        {"_id": ObjectId(holding_id)},
+        {"_id": oid},
         {"$set": {"note": body.note, "note_updated_at": datetime.utcnow().isoformat()}}
     )
     return {"message": "筆記更新成功"}

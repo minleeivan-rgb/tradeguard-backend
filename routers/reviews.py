@@ -14,11 +14,9 @@ def fix_id(doc):
 
 @router.post("/ai")
 async def ai_review(req: AIReviewRequest):
-    # 技術分析（台股用 FinMind，美股用 yfinance）
     if req.market == "tw":
         from services.finmind import get_tw_technical, get_tw_stock_price
         tech = await get_tw_technical(req.ticker)
-        # 盤中用即時價格
         if tech and is_tw_trading_hours():
             realtime = await get_tw_realtime_price(req.ticker)
             if realtime:
@@ -29,7 +27,8 @@ async def ai_review(req: AIReviewRequest):
         elif tech:
             tech["price_source"] = "收盤價"
     else:
-        tech = calculate_technical_indicators(req.ticker, req.market)
+        import asyncio
+        tech = await asyncio.to_thread(calculate_technical_indicators, req.ticker, req.market)
         if tech:
             tech["price_source"] = "yfinance"
 
@@ -73,6 +72,23 @@ async def ai_review(req: AIReviewRequest):
         entry_section = "\n".join(f"  - {r}" for r in entry_rules) if entry_rules else "（未勾選進場規則）"
         advisory_section = "\n".join(f"  - {r}" for r in advisory_rules) if advisory_rules else "（無）"
 
+        # FIX: entry_rules 為空時提供合理的核查說明，避免 X/0 條通過
+        if entry_rules:
+            rules_check_instruction = f"""
+━━━ 用戶這次的進場規則（必須全部達標，否則直接不通過）━━━
+{entry_section}
+
+請以繁體中文，按以下架構回覆：
+
+【進場規則核查】
+針對每條進場規則逐一判定：
+✅ 符合 或 ❌ 不符合（一句話說明）
+核查結論：X/{len(entry_rules)} 條通過"""
+        else:
+            rules_check_instruction = """
+━━━ 用戶本次未勾選任何進場規則 ━━━
+請在【進場規則核查】段落說明用戶沒有設定進場規則，建議去「設定」頁新增，並單純以技術面給予意見。"""
+
         prompt = f"""你是一個嚴格的交易紀律夥伴，同時也是有豐富經驗的技術分析師。
 
 股票：{req.ticker}（{req.market.upper()}）
@@ -81,19 +97,10 @@ async def ai_review(req: AIReviewRequest):
 目標與退場：{inputs.get('target','（未填）')}
 
 {tech_summary}
-
-━━━ 用戶這次的進場規則（必須全部達標，否則直接不通過）━━━
-{entry_section}
+{rules_check_instruction}
 
 ━━━ 用戶的背景規則（AI 參考用，不作為否決條件）━━━
 {advisory_section}
-
-請以繁體中文，按以下架構回覆：
-
-【進場規則核查】
-針對每條進場規則逐一判定：
-✅ 符合 或 ❌ 不符合（一句話說明）
-核查結論：X/{len(entry_rules)} 條通過
 
 【AI 技術觀察】
 - 日線動能：
@@ -110,6 +117,7 @@ async def ai_review(req: AIReviewRequest):
 規則：有任何進場規則 ❌ → [不通過]
      進場規則全 ✅ 但 AI 有重大疑慮 → [審慎評估]
      進場規則全 ✅ 且 AI 觀察正面 → [通過]
+     未設定進場規則 → [審慎評估]
 
 結論：[不通過] / [審慎評估] / [通過]
 一句話說明。語氣直接像嚴格的交易導師。"""
@@ -134,10 +142,13 @@ async def ai_review(req: AIReviewRequest):
 
     try:
         text = await call_claude(prompt)
-        verdict = "fail" if "[不通過]" in text else \
-                  "pass" if "[通過]" in text else "hold"
 
-        # 加上分析時間和股價標頭
+        # FIX: 原本在全文搜尋 [不通過]/[通過]，容易被分析段落誤觸發
+        # 改為只看最後 300 字（裁決區塊所在位置），大幅降低誤判率
+        tail = text[-300:]
+        verdict = "fail" if "[不通過]" in tail else \
+                  "pass" if "[通過]" in tail else "hold"
+
         from datetime import timezone, timedelta
         tw_tz = timezone(timedelta(hours=8))
         now_tw = datetime.now(tw_tz)

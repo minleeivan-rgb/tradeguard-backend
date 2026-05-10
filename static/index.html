@@ -772,8 +772,13 @@ async function loadReviewRules() {
 // ==================== API ====================
 
 async function checkApi() {
+  // FIX: 讀取輸入框的值並更新 API_BASE，讓設定頁真正有效
   const inputUrl = document.getElementById('apiUrl');
-  if(inputUrl) inputUrl.value = API_BASE;
+  if(inputUrl && inputUrl.value.trim()) {
+    API_BASE = inputUrl.value.trim().replace(/\/$/, '');
+  } else if(inputUrl) {
+    inputUrl.value = API_BASE;
+  }
   const dot = document.getElementById('statusDot');
   const txt = document.getElementById('statusText');
   try {
@@ -864,8 +869,8 @@ function renderHoldingCard(h) {
   const profit_trigger = PROFIT_PCT;
   const loss_trigger = LOSS_PCT;
 
-  // 停利進度條：只有獲利超過20%才開始算
-  const profitActivated = pnl >= 20;
+  // FIX: 原本硬寫 pnl >= 20，改為用 profit_trigger 動態判斷
+  const profitActivated = pnl > 0 && pullback > 0;
   const profitBarPct = profitActivated ? Math.min((pullback / profit_trigger) * 100, 100) : 0;
   const profitRemaining = Math.max(profit_trigger - pullback, 0).toFixed(1);
   const profitBarColor = profitBarPct > 80 ? 'red' : profitBarPct > 50 ? 'amber' : 'green';
@@ -943,12 +948,12 @@ function renderHoldingCard(h) {
     <div class="bar-section">
       <div class="bar-row">
         <div class="bar-labels">
-          <span class="bar-label">停利倒數 ${profitActivated ? '' : '（獲利達 20% 後啟動）'}</span>
+          <span class="bar-label">停利倒數 ${profitActivated ? '' : '（有獲利後開始追蹤）'}</span>
           <span class="bar-val" style="color:${profitBarColor === 'red' ? '#d63b3b' : profitBarColor === 'amber' ? '#c97c0a' : '#1a7a52'}">
-            ${profitActivated ? `還差 ${profitRemaining}%` : `獲利 ${pnl.toFixed(1)}% / 需達 20%`}
+            ${profitActivated ? `還差 ${profitRemaining}%` : `獲利 ${pnl.toFixed(1)}%，回檔達 ${profit_trigger}% 觸發`}
           </span>
         </div>
-        <div class="bar-track"><div class="bar-fill ${profitActivated ? profitBarColor : 'green'}" style="width:${profitActivated ? profitBarPct : Math.min((pnl/20)*100,100)}%"></div></div>
+        <div class="bar-track"><div class="bar-fill ${profitActivated ? profitBarColor : 'green'}" style="width:${profitActivated ? profitBarPct : Math.min((pullback/profit_trigger)*100,100)}%"></div></div>
       </div>
       <div class="bar-row">
         <div class="bar-labels">
@@ -1529,12 +1534,22 @@ async function loadHistory() {
   }
 }
 
+// FIX: webkitLineClamp === 'unset' 在不同瀏覽器不可靠（初始值是空字串不是 'unset'）
+// 改用 data-expanded 屬性追蹤展開狀態
 function toggleReview(id, btn) {
   const el = document.getElementById(id);
-  const expanded = el.style.webkitLineClamp === 'unset';
-  el.style.webkitLineClamp = expanded ? '3' : 'unset';
-  el.style.overflow = expanded ? 'hidden' : 'visible';
-  btn.textContent = expanded ? '展開全文' : '收起';
+  const expanded = el.dataset.expanded === 'true';
+  if(expanded) {
+    el.style.webkitLineClamp = '3';
+    el.style.overflow = 'hidden';
+    el.dataset.expanded = 'false';
+    btn.textContent = '展開全文';
+  } else {
+    el.style.webkitLineClamp = 'unset';
+    el.style.overflow = 'visible';
+    el.dataset.expanded = 'true';
+    btn.textContent = '收起';
+  }
 }
 
 // ==================== Journal ====================

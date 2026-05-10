@@ -5,13 +5,15 @@ from datetime import datetime
 
 _twse_cache = {"date": None, "industry_map": {}, "stock_names": {}}
 
+# FIX: 加入 performance 快取，避免非交易時段重複 fetch 同一份舊資料
+_perf_cache = {"date": None, "data": {}}
+
 async def fetch_twse_industry_map():
     global _twse_cache
     today = datetime.now().strftime("%Y%m%d")
     if _twse_cache["date"] == today and _twse_cache["industry_map"]:
         return _twse_cache["industry_map"], _twse_cache["stock_names"]
-    
-    # 抓上市(2)、上櫃(4)、興櫃(5)
+
     urls = [
         "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2",
         "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4",
@@ -54,6 +56,13 @@ async def fetch_twse_industry_map():
 
 
 async def fetch_twse_stock_performance():
+    global _perf_cache
+    today = datetime.now().strftime("%Y%m%d")
+
+    # FIX: 同日快取，避免重複 fetch（尤其非交易時段每次掃描都拉同份舊資料）
+    if _perf_cache["date"] == today and _perf_cache["data"]:
+        return _perf_cache["data"]
+
     try:
         url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?response=json"
         async with httpx.AsyncClient(timeout=30, verify=False) as client:
@@ -85,7 +94,10 @@ async def fetch_twse_stock_performance():
                     }
                 except:
                     continue
+
         print(f"[TWSE] 取得 {len(performance)} 支股票今日資料")
+        if performance:
+            _perf_cache.update({"date": today, "data": performance})
         return performance
     except Exception as e:
         print(f"[TWSE] STOCK_DAY_ALL 載入失敗：{e}")

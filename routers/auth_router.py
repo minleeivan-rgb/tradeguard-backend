@@ -1,9 +1,9 @@
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse
 from datetime import datetime
 from database import db
-from auth import create_token, get_google_token, get_google_user_info, GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI
+from auth import create_token, get_google_token, get_google_user_info, GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI, verify_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,7 +36,6 @@ async def callback(code: str = None, error: str = None):
         name  = user_info.get("name", email)
         picture = user_info.get("picture", "")
 
-        # 存入或更新 DB
         existing = await db.users.find_one({"email": email})
         if not existing:
             await db.users.insert_one({
@@ -56,10 +55,9 @@ async def callback(code: str = None, error: str = None):
                 {"$set": {"name": name, "picture": picture, "last_login": datetime.utcnow().isoformat()}}
             )
 
-        user_id = email  # 用 email 當 user_id
+        user_id = email
         jwt_token = create_token(user_id, email, name)
 
-        # 把 token 傳回前端
         import urllib.parse
         base_url = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback").replace("/auth/callback", "")
         user_data = urllib.parse.quote(f'{{"email":"{email}","name":"{name}","picture":"{picture}"}}')
@@ -68,9 +66,12 @@ async def callback(code: str = None, error: str = None):
     except Exception as e:
         return HTMLResponse(f"<script>window.location='/?error={str(e)}'</script>")
 
+# FIX: 原本 /auth/me 是空殼，加入真正的 token 驗證並回傳用戶資訊
 @router.get("/me")
-async def get_me(token: dict = None):
-    """取得目前登入用戶資訊"""
-    from fastapi import Depends
-    from auth import verify_token
-    return {"message": "請使用 Bearer token 呼叫此 API"}
+async def get_me(payload: dict = Depends(verify_token)):
+    """取得目前登入用戶資訊（需帶 Bearer token）"""
+    return {
+        "user_id": payload.get("sub"),
+        "email":   payload.get("email"),
+        "name":    payload.get("name"),
+    }
