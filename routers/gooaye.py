@@ -49,18 +49,24 @@ async def find_latest_episode() -> int:
     last_doc = await db.gooaye.find_one({}, sort=[("ep", -1)])
     start_ep = (last_doc["ep"] if last_doc else 655)
 
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        latest = start_ep
-        for ep in range(start_ep, start_ep + 20):
+    latest = start_ep
+    # 用 GET 而非 HEAD（socialworkerdaily 的 HEAD 不可靠）
+    # 碰到錯誤 continue 不 break，避免網路抖動造成誤判
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        for ep in range(start_ep, start_ep + 30):
             url = f"https://socialworkerdaily.com/notes-of-gooaye-ep-{ep}/"
             try:
-                r = await client.head(url, headers={"User-Agent": "Mozilla/5.0"})
-                if r.status_code == 200:
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                if r.status_code == 200 and f"ep-{ep}" in r.text.lower():
                     latest = ep
                 elif r.status_code == 404:
-                    break
+                    # 連續兩個 404 才停
+                    next_url = f"https://socialworkerdaily.com/notes-of-gooaye-ep-{ep+1}/"
+                    r2 = await client.get(next_url, headers={"User-Agent": "Mozilla/5.0"})
+                    if r2.status_code == 404:
+                        break
             except:
-                break
+                continue  # 網路問題就跳過，不中斷
     return latest
 
 @router.post("/fetch")
