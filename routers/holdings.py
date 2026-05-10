@@ -51,7 +51,10 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
                             "ma20": None, "ma60": None, "ma20_diff_pct": None, "ma60_diff_pct": None}
             if live:
                 current = live["current_price"]
-                highest = max(live["highest_price"], h.get("highest_price", 0))
+                # FIX: 不再使用 yfinance 抓的歷史最高（包含買入前的價格）
+                # 只用「現價 vs 資料庫已記錄最高」取大值，追蹤持倉期間最高點
+                stored_highest = h.get("highest_price", 0)
+                highest = max(current, stored_highest) if stored_highest > 0 else current
                 status  = calculate_status(current, h["entry_price"], highest, rules)
                 # FIX: ObjectId 保護
                 try:
@@ -115,7 +118,11 @@ async def add_holding(holding: Holding):
     # FIX: asyncio.to_thread 避免阻塞
     live = await asyncio.to_thread(get_stock_data, holding.ticker, holding.market)
     if live:
+        # FIX: 新增持倉時，最高點從進場價或現價取大值開始追蹤
+        # 不用 yfinance 的 highest_price（包含買入前歷史，會造成假停利警示）
+        current = live["current_price"]
         data.update(live)
+        data["highest_price"] = max(current, holding.entry_price)
         data["status"] = "ok"
     data["created_at"] = datetime.utcnow().isoformat()
     result = await db.holdings.insert_one(data)
