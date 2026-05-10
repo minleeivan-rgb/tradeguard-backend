@@ -38,6 +38,7 @@ from routers.trades      import router as trades_router
 from routers.users       import router as users_router
 from routers.stock       import router as stock_router
 from routers.auth_router import router as auth_router
+from routers.gooaye      import router as gooaye_router
 
 app.include_router(holdings_router)
 app.include_router(scan_router)
@@ -46,6 +47,7 @@ app.include_router(trades_router)
 app.include_router(users_router)
 app.include_router(stock_router)
 app.include_router(auth_router)
+app.include_router(gooaye_router)
 
 @app.get("/")
 async def root():

@@ -213,6 +213,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <button class="tab" onclick="go('history')">審核歷史</button>
       <button class="tab" onclick="go('journal')">日誌</button>
       <button class="tab" onclick="go('settings')">設定</button>
+      <button class="tab" onclick="go('gooaye')">股癌雷達</button>
     </div>
   </div>
 
@@ -361,6 +362,21 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <div class="card" style="padding:4px 18px" id="tradesList">
         <div class="loading"><span class="spinner"></span>載入交易紀錄中...</div>
       </div>
+    </div>
+
+    <!-- GOOAYE RADAR -->
+    <div id="gooaye" class="section">
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div>
+            <div style="font-size:15px;font-weight:700">股癌雷達</div>
+            <div style="font-size:12px;color:#aaa;margin-top:2px">每週三、六更新 · 抓取最新集數分析標的</div>
+          </div>
+          <button id="fetchGooayeBtn" onclick="fetchGooaye()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">抓取最新集數</button>
+        </div>
+        <div id="gooayeResult"></div>
+      </div>
+      <div id="gooayeHistory"></div>
     </div>
 
     <!-- SETTINGS -->
@@ -525,7 +541,7 @@ let API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:8000' 
   : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
-const tabIds = ['dashboard','scan','review','history','journal','settings'];
+const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye'];
 
 // ==================== 規則常數 ====================
 const CAT_CONFIG = {
@@ -635,6 +651,7 @@ function go(t) {
   if(t === 'history') loadHistory();
   if(t === 'review') { loadSellOptions(); loadReviewRules(); }
   if(t === 'settings') loadCustomRules();
+  if(t === 'gooaye') loadGooayeHistory();
 }
 
 // ==================== 自訂規則 ====================
@@ -1589,6 +1606,109 @@ async function saveRules() {
     alert('✓ 規則已儲存！');
   } catch(e) { alert(`儲存失敗：${e.message}`); }
 }
+
+// ==================== 股癌雷達 ====================
+
+function renderGooayeEp(data, isMain = false) {
+  const sentimentMap = {
+    bullish:  { label: '看多', cls: 'g' },
+    bearish:  { label: '看空', cls: 'r' },
+    neutral:  { label: '中性', cls: 'a' },
+  };
+  const date = data.analyzed_at ? data.analyzed_at.split('T')[0] : '—';
+
+  const stocksHtml = (data.stocks || []).map(s => {
+    const sent = sentimentMap[s.sentiment] || sentimentMap.neutral;
+    return `<div style="padding:12px 0;border-bottom:1px solid #f0f0ec">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px;font-weight:700;color:#1a1a1a">${s.ticker}</span>
+          <span style="font-size:12px;color:#888">${s.name || ''}</span>
+          <span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${s.market==='tw'?'#e8f5ee':'#e8f0fe'};color:${s.market==='tw'?'#1a7a52':'#2563eb'};font-weight:600">${s.market==='tw'?'台股':'美股'}</span>
+        </div>
+        <span class="badge ${sent.cls}">${sent.label}</span>
+      </div>
+      <div style="font-size:13px;color:#444;line-height:1.6;margin-bottom:4px">${s.story || ''}</div>
+      <div style="font-size:12px;color:#888;font-style:italic">→ ${s.sentiment_reason || ''}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card" style="margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div>
+        <span style="font-size:16px;font-weight:800;color:#1a7a52">EP${data.ep}</span>
+        <span style="font-size:12px;color:#aaa;margin-left:8px">分析於 ${date}</span>
+      </div>
+      <a href="${data.source_url || '#'}" target="_blank" style="font-size:11px;color:#1a7a52;text-decoration:none">查看原筆記 →</a>
+    </div>
+    ${data.summary ? `<div style="font-size:13px;color:#555;line-height:1.6;background:#f8f8f5;border-radius:10px;padding:10px 14px;margin-bottom:12px">${data.summary}</div>` : ''}
+    <div class="card-title">提到的標的（${(data.stocks||[]).length} 支）</div>
+    ${stocksHtml || '<div style="font-size:13px;color:#aaa;text-align:center;padding:12px">本集未提到明確股票標的</div>'}
+  </div>`;
+}
+
+async function fetchGooaye() {
+  const btn = document.getElementById('fetchGooayeBtn');
+  const res = document.getElementById('gooayeResult');
+  btn.disabled = true;
+  btn.textContent = '分析中...';
+  res.innerHTML = '<div class="loading"><span class="spinner"></span>正在抓取最新集數並分析，約需 30 秒...</div>';
+  try {
+    const r = await fetch(`${API_BASE}/gooaye/fetch`, { method: 'POST' });
+    if(!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `錯誤 ${r.status}`);
+    }
+    const data = await r.json();
+    res.innerHTML = data.cached
+      ? `<div style="font-size:12px;color:#1a7a52;padding:8px 0">✓ EP${data.ep} 已分析過，直接顯示</div>` + renderGooayeEp(data)
+      : renderGooayeEp(data);
+    await loadGooayeHistory();
+  } catch(e) {
+    res.innerHTML = `<div style="color:#d63b3b;font-size:13px;padding:8px 0">❌ ${e.message}<br><br>可能原因：<br>1. 最新集數尚未釋出或 socialworkerdaily 還沒更新<br>2. 可以明天再試</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '抓取最新集數';
+}
+
+async function loadGooayeHistory() {
+  const area = document.getElementById('gooayeHistory');
+  try {
+    const r = await fetch(`${API_BASE}/gooaye/history`);
+    const list = await r.json();
+    if(!list.length) { area.innerHTML = ''; return; }
+    area.innerHTML = `<div class="card-title" style="padding:4px 0 8px">歷史分析紀錄</div>` +
+      list.map(d => {
+        const date = d.analyzed_at ? d.analyzed_at.split('T')[0] : '';
+        const stockTickers = (d.stocks||[]).map(s=>s.ticker).join('、') || '—';
+        return `<div class="card" style="margin-bottom:8px;cursor:pointer" onclick="viewGooayeEp(${d.ep})">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <span style="font-size:15px;font-weight:700;color:#1a7a52">EP${d.ep}</span>
+              <span style="font-size:12px;color:#aaa;margin-left:8px">${date}</span>
+            </div>
+            <span style="font-size:11px;color:#888">${(d.stocks||[]).length} 支標的</span>
+          </div>
+          <div style="font-size:12px;color:#888;margin-top:4px">${stockTickers}</div>
+        </div>`;
+      }).join('');
+  } catch(e) { area.innerHTML = ''; }
+}
+
+async function viewGooayeEp(ep) {
+  const res = document.getElementById('gooayeResult');
+  res.innerHTML = '<div class="loading"><span class="spinner"></span>載入中...</div>';
+  document.getElementById('gooaye').scrollTop = 0;
+  window.scrollTo(0, 0);
+  try {
+    const r = await fetch(`${API_BASE}/gooaye/${ep}`);
+    const data = await r.json();
+    res.innerHTML = renderGooayeEp(data);
+  } catch(e) {
+    res.innerHTML = `<div style="color:#d63b3b;font-size:13px">載入失敗：${e.message}</div>`;
+  }
+}
+
 </script>
 </body>
 </html>
