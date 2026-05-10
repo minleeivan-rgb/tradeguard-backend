@@ -415,7 +415,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <div class="card">
         <div style="font-size:14px;font-weight:700;margin-bottom:12px">後端連線</div>
         <div class="field-label" style="margin-bottom:6px">API Base URL</div>
-        <input type="text" id="apiUrl" value="https://tradeguard-backend-production.up.railway.app">
+        <input type="text" id="apiUrl" value="http://localhost:8000">
         <button class="btn-sec" onclick="checkApi()">測試連線</button>
       </div>
     </div>
@@ -523,7 +523,7 @@ let USER_ID = null;
 let AUTH_TOKEN = null;
 let API_BASE = window.location.hostname === 'localhost' 
   ? 'http://localhost:8000' 
-  : 'https://tradeguard-backend-production.up.railway.app';
+  : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
 const tabIds = ['dashboard','scan','review','history','journal','settings'];
 
@@ -1032,14 +1032,6 @@ async function loadAlerts() {
 
 // ==================== 新增持倉 ====================
 
-async function deleteHolding(id, name) {
-  if(!confirm(`確定要刪除「${name}」這筆持倉嗎？`)) return;
-  try {
-    await fetch(`${API_BASE}/holdings/${id}`, {method:'DELETE'});
-    await loadDashboard(false);
-  } catch(e) { alert(`刪除失敗：${e.message}`); }
-}
-
 function openAddHolding() {
   document.getElementById('m-date').value = new Date().toISOString().split('T')[0];
   document.getElementById('m-ticker').value = '';
@@ -1188,8 +1180,9 @@ function loadSellOptions(holdings) {
     fetch(`${API_BASE}/holdings/${USER_ID}`).then(r=>r.json()).then(h=>loadSellOptions(h)).catch(()=>{});
     return;
   }
+  // FIX: 加入 data-ticker / data-market，讓賣出審核能正確取得代號和市場
   document.getElementById('s-ticker').innerHTML = holdings.map(h =>
-    `<option value="${h._id}">${h.ticker} ${h.name}</option>`).join('');
+    `<option value="${h._id}" data-ticker="${h.ticker}" data-market="${h.market||'tw'}">${h.ticker} ${h.name}</option>`).join('');
 }
 
 // ==================== 刪除持倉 ====================
@@ -1451,8 +1444,11 @@ async function doReview(type) {
     };
   } else {
     const sel = document.getElementById('s-ticker');
-    ticker = sel.options[sel.selectedIndex]?.text||'';
-    market = 'tw';
+    const opt = sel.options[sel.selectedIndex];
+    // FIX: 用 data-ticker 取代 text（text 是「2327 國巨」會讓後端抓不到技術指標）
+    ticker = opt?.dataset.ticker || '';
+    // FIX: 用 data-market 取代硬寫 'tw'，美股賣出審核也能正常運作
+    market = opt?.dataset.market || 'tw';
     inputs = { reason: document.getElementById('s-reason').value||'（未填）' };
   }
 

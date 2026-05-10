@@ -194,8 +194,13 @@ async def check_alerts(user_id: str):
     rules = user.get("rules", {}) if user else {"profit_trailing_pct": 20, "stoploss_pct": 7}
     alerts = []
     async for h in db.holdings.find({"user_id": user_id}):
-        # FIX: asyncio.to_thread 避免阻塞
-        live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
+        # FIX: 台股優先用 FinMind 取即時價，避免 yfinance 延遲一天
+        live = None
+        if h["market"] == "tw":
+            from services.finmind import get_tw_stock_price
+            live = await get_tw_stock_price(h["ticker"])
+        if not live:
+            live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
         if not live:
             continue
         current  = live["current_price"]

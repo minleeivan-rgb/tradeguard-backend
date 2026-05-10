@@ -70,7 +70,9 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
                                   "ma60_diff_pct": live["ma60_diff_pct"],
                                   "status": status, "updated_at": datetime.utcnow().isoformat()}}
                     )
-                h.update({"current_price": current, "highest_price": highest, "status": status, **live})
+                # FIX: 過濾掉 raw_closes/raw_rows（幾百筆原始資料），避免 response 過大
+                safe_live = {k: v for k, v in live.items() if k not in ("raw_closes", "raw_rows")}
+                h.update({"current_price": current, "highest_price": highest, "status": status, **safe_live})
 
         if h.get("current_price") and h.get("entry_price"):
             h["pnl_pct"] = round((h["current_price"] - h["entry_price"]) / h["entry_price"] * 100, 2)
@@ -115,18 +117,27 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
 @router.post("")
 async def add_holding(holding: Holding):
     data = holding.dict()
-    # FIX: asyncio.to_thread 避免阻塞
-    live = await asyncio.to_thread(get_stock_data, holding.ticker, holding.market)
+    live = None
+    # FIX: 台股優先用 FinMind（資料較準），失敗才 fallback 到 yfinance
+    if holding.market == "tw":
+        from services.finmind import get_tw_stock_price
+        live = await get_tw_stock_price(holding.ticker)
+    if not live:
+        live = await asyncio.to_thread(get_stock_data, holding.ticker, holding.market)
     if live:
-        # FIX: 新增持倉時，最高點從進場價或現價取大值開始追蹤
-        # 不用 yfinance 的 highest_price（包含買入前歷史，會造成假停利警示）
         current = live["current_price"]
-        data.update(live)
+        # FIX: 只寫入安全欄位，避免 raw_closes/raw_rows 存進 DB
+        data["current_price"] = current
+        data["ma20"] = live.get("ma20")
+        data["ma60"] = live.get("ma60")
+        data["ma20_diff_pct"] = live.get("ma20_diff_pct")
+        data["ma60_diff_pct"] = live.get("ma60_diff_pct")
+        # FIX: 最高點從進場價或現價取大值，不用歷史最高
         data["highest_price"] = max(current, holding.entry_price)
         data["status"] = "ok"
     data["created_at"] = datetime.utcnow().isoformat()
     result = await db.holdings.insert_one(data)
-    return {"id": str(result.inserted_id), "message": "持倉新增成功", "stock_data": live}
+    return {"id": str(result.inserted_id), "message": "持倉新增成功"}
 
 @router.put("/{holding_id}")
 async def update_holding(holding_id: str, update: HoldingUpdate):
