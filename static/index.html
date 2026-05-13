@@ -367,12 +367,18 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
     <!-- GOOAYE RADAR -->
     <div id="gooaye" class="section">
       <div class="card" style="margin-bottom:10px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div>
-            <div style="font-size:15px;font-weight:700">股癌雷達</div>
-            <div style="font-size:12px;color:#aaa;margin-top:2px">每週三、六更新 · 抓取最新集數分析標的</div>
+        <div style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <div>
+              <div style="font-size:15px;font-weight:700">股癌雷達</div>
+              <div style="font-size:12px;color:#aaa;margin-top:2px">每週三、六更新 · 分析結果永久保存</div>
+            </div>
+            <button id="fetchGooayeBtn" onclick="fetchGooaye()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">抓取最新集數</button>
           </div>
-          <button id="fetchGooayeBtn" onclick="fetchGooaye()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">抓取最新集數</button>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="searchEp" type="number" placeholder="輸入集數，例如 660" style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:10px;font-size:13px">
+            <button onclick="searchGooayeEp()" style="padding:8px 16px;background:#f0f0ec;color:#333;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">查詢 / 抓取</button>
+          </div>
         </div>
         <div id="gooayeResult"></div>
       </div>
@@ -1645,6 +1651,39 @@ function renderGooayeEp(data, isMain = false) {
     <div class="card-title">提到的標的（${(data.stocks||[]).length} 支）</div>
     ${stocksHtml || '<div style="font-size:13px;color:#aaa;text-align:center;padding:12px">本集未提到明確股票標的</div>'}
   </div>`;
+}
+
+async function searchGooayeEp() {
+  const epInput = document.getElementById('searchEp');
+  const ep = parseInt(epInput.value);
+  if(!ep || ep < 1) { alert('請輸入有效的集數'); return; }
+  const res = document.getElementById('gooayeResult');
+
+  // 先看 DB 有沒有
+  res.innerHTML = '<div class="loading"><span class="spinner"></span>查詢中...</div>';
+  try {
+    const r = await fetch(`${API_BASE}/gooaye/${ep}`);
+    if(r.ok) {
+      const data = await r.json();
+      res.innerHTML = '<div style="font-size:12px;color:#1a7a52;padding:6px 0">✓ 已有分析紀錄，直接顯示</div>' + renderGooayeEp(data);
+      return;
+    }
+  } catch(e) {}
+
+  // DB 沒有就去抓
+  res.innerHTML = `<div class="loading"><span class="spinner"></span>EP${ep} 尚未分析，正在抓取，約需 30 秒...</div>`;
+  try {
+    const r = await fetch(`${API_BASE}/gooaye/fetch?ep=${ep}`, { method: 'POST' });
+    if(!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `錯誤 ${r.status}`);
+    }
+    const data = await r.json();
+    res.innerHTML = renderGooayeEp(data);
+    await loadGooayeHistory();
+  } catch(e) {
+    res.innerHTML = `<div style="color:#d63b3b;font-size:13px;padding:8px 0">❌ ${e.message}</div>`;
+  }
 }
 
 async function fetchGooaye() {
