@@ -19,11 +19,33 @@ def strip_html(html: str) -> str:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     return '\n'.join(lines)
 
+def get_latest_ep_by_calendar() -> int:
+    """
+    純用週曆算目前最新集數，完全不需要連網。
+    基準：EP660 = 2026-05-09（週六）
+    規律：每週三(weekday=2)、週六(weekday=5) 各出一集
+    """
+    ref_ep   = 660
+    ref_date = date(2026, 5, 9)
+    today    = date.today()
+    if today <= ref_date:
+        return ref_ep
+    count = 0
+    d = ref_date + timedelta(days=1)
+    while d <= today:
+        if d.weekday() in (2, 5):
+            count += 1
+        d += timedelta(days=1)
+    return ref_ep + count
+
 async def fetch_episode_content(ep_num: int) -> str | None:
+    """從 socialworkerdaily 抓指定集數內容"""
     url = f"https://socialworkerdaily.com/notes-of-gooaye-ep-{ep_num}/"
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            r = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            })
         if r.status_code != 200:
             return None
         html = r.text
@@ -37,74 +59,24 @@ async def fetch_episode_content(ep_num: int) -> str | None:
         print(f"[Gooaye] fetch error EP{ep_num}: {e}")
         return None
 
-def estimate_ep_by_calendar() -> int:
-    """
-    用週曆推算目前最新集數。
-    基準：EP660 = 2026-05-09（週六）
-    規律：每週三、週六各出一集
-    """
-    ref_ep   = 660
-    ref_date = date(2026, 5, 9)  # 週六
-    today    = date.today()
-    if today <= ref_date:
-        return ref_ep
-    count = 0
-    d = ref_date + timedelta(days=1)
-    while d <= today:
-        if d.weekday() in (2, 5):  # 週三=2, 週六=5
-            count += 1
-        d += timedelta(days=1)
-    return ref_ep + count
-
-async def find_latest_episode() -> int:
-    """
-    用週曆估算目前集數，再去 socialworkerdaily 實際驗證，
-    回傳網站上真正存在的最新集數。
-    """
-    estimated = estimate_ep_by_calendar()
-
-    # DB 裡最新的集數也當參考
-    last_doc = await db.gooaye.find_one({}, sort=[("ep", -1)])
-    db_latest = last_doc["ep"] if last_doc else 0
-
-    # 從兩者取大，往前 2 集掃到往後 3 集
-    start = max(estimated, db_latest) - 2
-    start = max(start, 600)
-
-    latest = start - 1  # 預設為 start-1，掃到任何存在的就更新
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-        consecutive_404 = 0
-        for ep in range(start, start + 8):
-            url = f"https://socialworkerdaily.com/notes-of-gooaye-ep-{ep}/"
-            try:
-                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                if r.status_code == 200:
-                    latest = ep
-                    consecutive_404 = 0
-                elif r.status_code == 404:
-                    consecutive_404 += 1
-                    if consecutive_404 >= 2:
-                        break
-                else:
-                    consecutive_404 = 0
-            except:
-                continue  # 網路問題跳過，不中斷
-    return latest
-
 @router.post("/fetch")
-async def fetch_and_analyze():
-    """手動觸發：找最新集數、抓內容、AI 分析、存 DB"""
-    ep_num = await find_latest_episode()
-
-    if ep_num < 600:
-        raise HTTPException(status_code=500, detail="無法找到有效集數，請稍後再試")
+async def fetch_and_analyze(ep: int = None):
+    """
+    手動觸發：抓取並分析最新集數。
+    ep: 可選，手動指定集數；不填則用週曆自動算。
+    """
+    # 決定目標集數
+    if ep:
+        ep_num = ep
+    else:
+        ep_num = get_latest_ep_by_calendar()
 
     # 已分析過直接回傳
     existing = await db.gooaye.find_one({"ep": ep_num})
     if existing:
         return {**fix_id(existing), "cached": True}
 
-    # 抓內容
+    # 抓內容（直接抓目標集數，不掃描）
     content = await fetch_episode_content(ep_num)
     if not content or len(content) < 100:
         raise HTTPException(
