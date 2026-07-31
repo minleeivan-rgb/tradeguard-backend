@@ -92,6 +92,8 @@ def calculate_technical_indicators(ticker: str, market: str) -> dict:
         current = float(closes.iloc[-1])
 
         ma5   = round(float(closes.tail(5).mean()), 2)
+        # FIX: 加入 MA10
+        ma10  = round(float(closes.tail(10).mean()), 2) if len(closes) >= 10 else None
         ma20  = round(float(closes.tail(20).mean()), 2)
         ma60  = round(float(closes.tail(60).mean()), 2)
         ma120 = round(float(closes.tail(120).mean()), 2) if len(closes) >= 120 else None
@@ -176,7 +178,7 @@ def calculate_technical_indicators(ticker: str, market: str) -> dict:
         return {
             "ticker": ticker, "market": market,
             "current_price": round(current, 2),
-            "ma": {"ma5": ma5, "ma20": ma20, "ma60": ma60, "ma120": ma120, "ma240": ma240},
+            "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60, "ma120": ma120, "ma240": ma240},
             "ma20_diff_pct": round((current - ma20) / ma20 * 100, 2),
             "ma60_diff_pct": round((current - ma60) / ma60 * 100, 2),
             "rsi": rsi,
@@ -197,9 +199,7 @@ def calculate_status(current_price, entry_price, highest_price, rules) -> str:
     trailing_pct = (highest_price - current_price) / highest_price * 100 if highest_price > 0 else 0
     profit_trigger  = rules.get("profit_trailing_pct", 20)
     stoploss_trigger = rules.get("stoploss_pct", 7)
-
-    # FIX: 原本 pnl_pct >= 20 是硬寫的，與 profit_trigger 無關
-    # 改為：只要有獲利且回檔幅度達觸發點即警示
+    # FIX: 移除硬寫的 pnl_pct >= 20，改為只要有獲利且回檔達觸發點即警示
     if pnl_pct > 0 and trailing_pct >= profit_trigger:    return "profit_alert"
     elif pnl_pct <= -stoploss_trigger:                    return "loss_alert"
     elif trailing_pct >= profit_trigger * 0.8:            return "watch"
