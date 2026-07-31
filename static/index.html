@@ -214,6 +214,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <button class="tab" onclick="go('journal')">日誌</button>
       <button class="tab" onclick="go('settings')">設定</button>
       <button class="tab" onclick="go('gooaye')">股癌雷達</button>
+      <button class="tab" onclick="go('market')">大盤雷達</button>
     </div>
   </div>
 
@@ -383,6 +384,63 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
         <div id="gooayeResult"></div>
       </div>
       <div id="gooayeHistory"></div>
+    </div>
+
+    <!-- MARKET RADAR -->
+    <div id="market" class="section">
+
+      <!-- 頂部：手動刷新 + 上次更新時間 -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">大盤雷達</div>
+          <div id="marketUpdatedAt" style="font-size:12px;color:#aaa;margin-top:2px">點擊刷新載入資料</div>
+        </div>
+        <button onclick="loadMarketRadar()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">刷新</button>
+      </div>
+
+      <!-- VIX + 大盤概況 -->
+      <div id="marketVixRow" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px"></div>
+
+      <!-- 國際指數 -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">國際指數</div>
+        <div id="marketIndices" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- 台灣市場 -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">台灣市場</div>
+        <div id="marketTW" style="margin-top:8px">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- 族群強弱 -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">族群強弱（今日 Top 10）</div>
+        <div id="marketSectors" style="margin-top:8px">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- 個股背離 -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">持倉背離偵測</div>
+        <div id="marketDivergence" style="margin-top:8px">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+      </div>
+
+      <!-- 融資維持率 -->
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">個人融資維持率</div>
+        <div id="marketMarginHealth" style="margin-top:8px">
+          <div class="loading"><span class="spinner"></span></div>
+        </div>
+      </div>
+
     </div>
 
     <!-- SETTINGS -->
