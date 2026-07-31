@@ -6,9 +6,9 @@ from datetime import datetime, timedelta
 FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
 FINMIND_BASE = "https://api.finmindtrade.com/api/v4/data"
 
-# FIX: 加入 TaiwanStockInfo 快取，避免每次搜尋都拉全部股票清單（2000+ 筆）
+# ── 搜尋快取（TTL 6 小時，避免每次搜尋都拉 2000+ 筆）──
 _stock_info_cache: dict = {"data": None, "fetched_at": 0.0}
-_STOCK_INFO_TTL = 6 * 3600  # 快取 6 小時
+_STOCK_INFO_TTL = 6 * 3600
 
 async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: str = None) -> list:
     if not start_date:
@@ -29,12 +29,12 @@ async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: 
         raise Exception(f"FinMind error: {data.get('msg', 'unknown')}")
     return data.get("data", [])
 
+
 async def search_tw_stock(q: str) -> list:
-    """搜尋台股代號或名稱（加入快取，TTL 6 小時）"""
+    """搜尋台股代號或名稱（快取 6 小時）"""
     global _stock_info_cache
     try:
         now = time.time()
-        # FIX: 快取過期或首次呼叫才重新 fetch
         if _stock_info_cache["data"] is None or (now - _stock_info_cache["fetched_at"]) > _STOCK_INFO_TTL:
             params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
             async with httpx.AsyncClient(timeout=15) as client:
@@ -58,8 +58,9 @@ async def search_tw_stock(q: str) -> list:
         print(f"[FinMind] search error: {e}")
         return []
 
+
 async def get_tw_stock_price(stock_id: str) -> dict:
-    """取得台股收盤價和技術指標資料"""
+    """取得台股收盤價和基本技術指標"""
     try:
         start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         end = datetime.now().strftime("%Y-%m-%d")
@@ -90,10 +91,10 @@ async def get_tw_stock_price(stock_id: str) -> dict:
         print(f"[FinMind] price error {stock_id}: {e}")
         return None
 
+
 async def get_tw_technical(stock_id: str) -> dict:
-    """用 FinMind 計算台股完整技術指標"""
+    """用 FinMind 計算台股完整技術指標（含 MA10）"""
     import pandas as pd
-    # FIX: 移除未使用的 numpy import
     try:
         data = await get_tw_stock_price(stock_id)
         if not data or len(data["raw_closes"]) < 60:
@@ -193,4 +194,136 @@ async def get_tw_technical(stock_id: str) -> dict:
         }
     except Exception as e:
         print(f"[FinMind] technical error {stock_id}: {e}")
+        return None
+
+
+# ── 大盤市場資料（新增）────────────────────────────────────────────
+
+async def get_tw_index_data(days: int = 120) -> dict | None:
+    """台股加權指數日線 + RSI + KD"""
+    try:
+        import pandas as pd
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanStockIndex", "data_id": "TAIEX",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        closes = pd.Series([float(r["price"]) for r in rows])
+        current = float(closes.iloc[-1])
+        prev    = float(closes.iloc[-2])
+        change_pct = round((current - prev) / prev * 100, 2)
+        # RSI
+        delta = closes.diff()
+        gain  = delta.clip(lower=0).rolling(14).mean()
+        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        rsi = round(float(100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1]))), 1) \
+              if loss.iloc[-1] > 0 else 50.0
+        # KD
+        low9  = closes.rolling(9).min()
+        high9 = closes.rolling(9).max()
+        rsv   = (closes - low9) / (high9 - low9) * 100
+        k = rsv.ewm(com=2).mean()
+        d = k.ewm(com=2).mean()
+        return {
+            "name": "台股加權指數",
+            "current": round(current, 2),
+            "change_pct": change_pct,
+            "rsi": rsi,
+            "kd": {"k": round(float(k.iloc[-1]), 1), "d": round(float(d.iloc[-1]), 1)},
+            "date": rows[-1]["date"],
+        }
+    except Exception as e:
+        print(f"[FinMind] TW Index error: {e}")
+        return None
+
+
+async def get_tw_futures_data(days: int = 60) -> dict | None:
+    """台指期 TX 日線"""
+    try:
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanFuturesDaily", "data_id": "TX",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        latest = rows[-1]
+        prev   = rows[-2] if len(rows) > 1 else rows[-1]
+        close  = float(latest.get("close", 0))
+        prev_c = float(prev.get("close", close))
+        change_pct = round((close - prev_c) / prev_c * 100, 2) if prev_c else 0
+        return {
+            "name": "台指期 TX",
+            "current": round(close, 0),
+            "change_pct": change_pct,
+            "date": latest.get("date"),
+        }
+    except Exception as e:
+        print(f"[FinMind] Futures error: {e}")
+        return None
+
+
+async def get_tw_margin_balance() -> dict | None:
+    """台股整體融資餘額趨勢"""
+    try:
+        start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanStockMarginPurchaseShortSale",
+                  "data_id": "整體市場",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        latest   = rows[-1]
+        prev     = rows[-2] if len(rows) > 1 else rows[-1]
+        bal      = float(latest.get("MarginPurchaseBalanceAmount", 0))
+        prev_bal = float(prev.get("MarginPurchaseBalanceAmount", bal))
+        change_pct = round((bal - prev_bal) / prev_bal * 100, 2) if prev_bal else 0
+        return {
+            "balance":    round(bal / 1e8, 2),
+            "change_pct": change_pct,
+            "trend":      "增加" if change_pct > 0 else "減少",
+            "date":       latest.get("date"),
+        }
+    except Exception as e:
+        print(f"[FinMind] Margin error: {e}")
+        return None
+
+
+async def get_tw_institutional() -> dict | None:
+    """三大法人近期買賣超（外資為主）"""
+    try:
+        start = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanStockInstitutionalInvestors",
+                  "data_id": "整體市場",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        foreign = [r for r in rows if "外" in r.get("name", "")]
+        recent  = foreign[-5:] if len(foreign) >= 5 else foreign
+        net = sum(float(r.get("buy", 0)) - float(r.get("sell", 0)) for r in recent)
+        return {
+            "foreign_net_5d": round(net / 1e8, 2),
+            "trend":          "買超" if net > 0 else "賣超",
+            "days":           len(recent),
+            "date":           rows[-1].get("date"),
+        }
+    except Exception as e:
+        print(f"[FinMind] Institutional error: {e}")
         return None
