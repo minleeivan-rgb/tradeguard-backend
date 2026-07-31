@@ -4,9 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 _twse_cache = {"date": None, "industry_map": {}, "stock_names": {}}
-
-# FIX: 加入 performance 快取，避免非交易時段重複 fetch 同一份舊資料
-_perf_cache = {"date": None, "data": {}}
+_perf_cache  = {"date": None, "data": {}}
 
 async def fetch_twse_industry_map():
     global _twse_cache
@@ -59,7 +57,7 @@ async def fetch_twse_stock_performance():
     global _perf_cache
     today = datetime.now().strftime("%Y%m%d")
 
-    # FIX: 同日快取，避免重複 fetch（尤其非交易時段每次掃描都拉同份舊資料）
+    # FIX: 同日快取，避免重複 fetch
     if _perf_cache["date"] == today and _perf_cache["data"]:
         return _perf_cache["data"]
 
@@ -94,7 +92,6 @@ async def fetch_twse_stock_performance():
                     }
                 except:
                     continue
-
         print(f"[TWSE] 取得 {len(performance)} 支股票今日資料")
         if performance:
             _perf_cache.update({"date": today, "data": performance})
