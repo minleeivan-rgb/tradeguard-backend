@@ -8,13 +8,15 @@ import os
 
 load_dotenv()
 
-# FIX: @app.on_event("startup") 在 FastAPI 0.93+ 已 deprecated
-#      改用 lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 移除啟動預載，避免 TWSE 連線 timeout 造成 Railway crash
+    # 啟動排程（盤中每5分鐘掃描 + 14:30日報）
+    try:
+        from services.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as e:
+        print(f"[Startup] 排程啟動失敗：{e}")
     yield
-    # shutdown 時可加清理邏輯（目前無需要）
 
 app = FastAPI(title="TradeGuard API v2", lifespan=lifespan)
 
@@ -33,6 +35,7 @@ from routers.users       import router as users_router
 from routers.stock       import router as stock_router
 from routers.auth_router import router as auth_router
 from routers.gooaye      import router as gooaye_router
+from routers.market      import router as market_router
 
 app.include_router(holdings_router)
 app.include_router(scan_router)
@@ -42,14 +45,15 @@ app.include_router(users_router)
 app.include_router(stock_router)
 app.include_router(auth_router)
 app.include_router(gooaye_router)
+app.include_router(market_router)
 
 @app.get("/")
 async def root():
     html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(html_path):
         return FileResponse(html_path)
-    return {"status": "ok", "message": "TradeGuard API v2 is running 🚀"}
+    return {"status": "ok", "message": "TradeGuard API v2 is running"}
 
 @app.get("/status")
 async def status():
-    return {"status": "ok", "message": "TradeGuard API v2 is running 🚀"}
+    return {"status": "ok", "message": "TradeGuard API v2 is running"}
