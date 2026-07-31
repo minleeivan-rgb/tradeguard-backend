@@ -108,6 +108,7 @@ async def get_tw_technical(stock_id: str) -> dict:
 
         # MA
         ma5   = round(float(closes.tail(5).mean()), 2)
+        ma10  = round(float(closes.tail(10).mean()), 2) if len(closes) >= 10 else None
         ma20  = round(float(closes.tail(20).mean()), 2)
         ma60  = round(float(closes.tail(60).mean()), 2)
         ma120 = round(float(closes.tail(120).mean()), 2) if len(closes) >= 120 else None
@@ -178,7 +179,7 @@ async def get_tw_technical(stock_id: str) -> dict:
         return {
             "ticker": stock_id, "market": "tw",
             "current_price": round(current, 2),
-            "ma": {"ma5": ma5, "ma20": ma20, "ma60": ma60, "ma120": ma120, "ma240": ma240},
+            "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60, "ma120": ma120, "ma240": ma240},
             "ma20_diff_pct": round((current - ma20) / ma20 * 100, 2),
             "ma60_diff_pct": round((current - ma60) / ma60 * 100, 2),
             "rsi": rsi,
