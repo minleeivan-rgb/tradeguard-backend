@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from datetime import datetime
 from services.twse import fetch_twse_industry_map, fetch_twse_stock_performance
 from services.yfinance_service import scan_sector_yf
+from services.line_notify import send_line_message
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
@@ -188,42 +189,86 @@ async def scan_us():
 @router.get("/alerts/{user_id}")
 async def check_alerts(user_id: str):
     from database import db
-    from services.yfinance_service import get_stock_data, calculate_status
-    # FIX: 原本 {"name": user_id}，改為 {"email": user_id}
+    from services.finmind import get_tw_technical
+    from services.yfinance_service import calculate_technical_indicators
+
     user  = await db.users.find_one({"email": user_id})
     rules = user.get("rules", {}) if user else {"profit_trailing_pct": 20, "stoploss_pct": 7}
     alerts = []
+    line_messages = []
+
     async for h in db.holdings.find({"user_id": user_id}):
-        # FIX: 台股優先用 FinMind 取即時價，避免 yfinance 延遲一天
-        live = None
-        if h["market"] == "tw":
-            from services.finmind import get_tw_stock_price
-            live = await get_tw_stock_price(h["ticker"])
-        if not live:
-            live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
-        if not live:
+        name   = h.get("name", h["ticker"])
+        ticker = h["ticker"]
+        market = h.get("market", "tw")
+
+        # 台股用 FinMind 取完整技術指標（含MA5/MA10）
+        if market == "tw":
+            tech = await get_tw_technical(ticker)
+        else:
+            tech = await asyncio.to_thread(calculate_technical_indicators, ticker, market)
+
+        if not tech:
             continue
-        current  = live["current_price"]
-        highest  = max(live["highest_price"], h.get("highest_price", 0))
-        entry    = h["entry_price"]
+
+        current = tech["current_price"]
+        entry   = h["entry_price"]
+        highest = max(current, h.get("highest_price", 0))
         pnl_pct  = round((current - entry) / entry * 100, 2)
-        pullback = round((highest - current) / highest * 100, 2)
+        pullback = round((highest - current) / highest * 100, 2) if highest > 0 else 0
         pt = rules.get("profit_trailing_pct", 20)
         sl = rules.get("stoploss_pct", 7)
-        name = h.get("name", h["ticker"])
+
+        # ── 停利停損 ──
         if pnl_pct > 0 and pullback >= pt:
-            alerts.append({"type":"profit_alert","ticker":h["ticker"],"name":name,
-                           "message":f"從最高點回檔 {pullback}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high"})
+            msg = f"\U0001f534【停利警示】{ticker} {name}\n從最高點回檔 {pullback:.1f}%，已觸發停利條件\n現價 ${current}，損益 +{pnl_pct}%"
+            alerts.append({"type":"profit_alert","ticker":ticker,"name":name,
+                           "message":f"從最高點回檔 {pullback:.1f}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high"})
+            line_messages.append(msg)
         elif pnl_pct > 0 and pullback >= pt * 0.8:
-            alerts.append({"type":"profit_watch","ticker":h["ticker"],"name":name,
-                           "message":f"回檔 {pullback}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium"})
+            alerts.append({"type":"profit_watch","ticker":ticker,"name":name,
+                           "message":f"回檔 {pullback:.1f}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium"})
         elif pnl_pct <= -sl:
-            alerts.append({"type":"loss_alert","ticker":h["ticker"],"name":name,
-                           "message":f"虧損 {abs(pnl_pct)}%，已觸發停損條件","pnl_pct":pnl_pct,"severity":"high"})
-        if live.get("ma60_diff_pct") and live["ma60_diff_pct"] < -2:
-            alerts.append({"type":"ma_alert","ticker":h["ticker"],"name":name,
-                           "message":f"跌破季線 {abs(live['ma60_diff_pct'])}%","severity":"high"})
-        elif live.get("ma20_diff_pct") and live["ma20_diff_pct"] < -1:
-            alerts.append({"type":"ma_watch","ticker":h["ticker"],"name":name,
-                           "message":f"接近月線，距離 {abs(live['ma20_diff_pct'])}%","severity":"medium"})
+            msg = f"\U0001f534【停損警示】{ticker} {name}\n虧損 {abs(pnl_pct):.1f}%，已觸發停損條件\n現價 ${current}"
+            alerts.append({"type":"loss_alert","ticker":ticker,"name":name,
+                           "message":f"虧損 {abs(pnl_pct):.1f}%，已觸發停損條件","pnl_pct":pnl_pct,"severity":"high"})
+            line_messages.append(msg)
+
+        # ── 均線警示（含 MA5/MA10，正確顯示正負號）──
+        ma   = tech.get("ma", {})
+        ma5  = ma.get("ma5")
+        ma10 = ma.get("ma10")
+        ma20 = ma.get("ma20")
+        ma60 = ma.get("ma60")
+
+        def md(price, mav):
+            if not mav: return None
+            return round((price - mav) / mav * 100, 2)
+
+        for label, mav, typename in [
+            ("5日線",  ma5,  "ma5_touch"),
+            ("10日線", ma10, "ma10_touch"),
+            ("月線",   ma20, "ma20_touch"),
+            ("季線",   ma60, "ma60_touch"),
+        ]:
+            diff = md(current, mav)
+            if diff is None:
+                continue
+            if abs(diff) <= 2:
+                direction = "站上" if diff >= 0 else "觸碰"
+                msg = f"\U0001f4ca【{label}觸碰】{ticker} {name}\n現價 ${current} {direction} {label}（{diff:+.1f}%）"
+                alerts.append({"type": typename, "ticker": ticker, "name": name,
+                               "message": f"觸碰{label}（{diff:+.1f}%）", "severity": "medium"})
+                line_messages.append(msg)
+            elif diff < -2 and label in ("月線", "季線"):
+                msg = f"\U0001f7e1【跌破{label}】{ticker} {name}\n現價 ${current}，{label}（{diff:.1f}%）"
+                alerts.append({"type": "ma_alert", "ticker": ticker, "name": name,
+                               "message": f"跌破{label}（{diff:.1f}%）", "severity": "high"})
+                line_messages.append(msg)
+
+    # 批次發送 LINE
+    if line_messages:
+        full_msg = "\u26a0\ufe0f TradeGuard 警示\n" + "─" * 20 + "\n" + "\n\n".join(line_messages)
+        await send_line_message(full_msg)
+
     return {"alerts": alerts, "checked_at": datetime.utcnow().isoformat()}
