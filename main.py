@@ -12,13 +12,7 @@ load_dotenv()
 #      改用 lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """啟動時預載 TWSE 全股票清單（1700+），確保搜尋永遠有資料"""
-    try:
-        from services.twse import fetch_twse_industry_map
-        industry_map, stock_names = await fetch_twse_industry_map()
-        print(f"[Startup] 預載完成：{len(stock_names)} 支股票")
-    except Exception as e:
-        print(f"[Startup] 預載失敗（不影響服務）：{e}")
+    # 移除啟動預載，避免 TWSE 連線 timeout 造成 Railway crash
     yield
     # shutdown 時可加清理邏輯（目前無需要）
 
