@@ -217,6 +217,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <button class="tab" onclick="go('market')">大盤雷達</button>
       <button class="tab" onclick="go('watchlist')">觀察清單</button>
       <button class="tab" onclick="go('etf')">主動ETF</button>
+      <button class="tab" onclick="go('chips')">籌碼</button>
     </div>
   </div>
 
@@ -486,6 +487,34 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
 
     </div>
 
+    <!-- CHIPS -->
+    <div id="chips" class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">籌碼追蹤</div>
+          <div style="font-size:12px;color:#aaa;margin-top:2px">分點主力、八大行庫、產業鏈資金流（Sponsor 資料）</div>
+        </div>
+        <button onclick="loadChips()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">刷新</button>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="card-title" style="flex-shrink:0">個股分點 / 分K</div>
+          <input id="chipTicker" placeholder="代號，如 2327" style="flex:1;padding:8px 12px;border:1px solid #e5e5e0;border-radius:10px;font-size:14px">
+          <button onclick="loadBranch()" style="padding:8px 14px;background:#141413;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">查詢</button>
+        </div>
+        <div id="chipKbar" style="margin-top:10px"></div>
+        <div id="chipBranch" style="margin-top:6px"><div style="color:#aaa;text-align:center;padding:10px;font-size:13px">輸入代號查分點主力與分時走勢</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">八大行庫（國安基金代理指標）</div>
+        <div id="chipGov" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">點擊刷新載入</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">產業鏈資金流向</div>
+        <div id="chipFlow" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">點擊刷新載入</div></div>
+      </div>
+    </div>
+
     <!-- ACTIVE ETF -->
     <div id="etf" class="section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -702,7 +731,7 @@ let API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:8000' 
   : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
-const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist','etf'];
+const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist','etf','chips'];
 
 // ==================== 規則常數 ====================
 const CAT_CONFIG = {
@@ -816,6 +845,7 @@ function go(t) {
   if(t === 'market') loadMarketRadar();
   if(t === 'watchlist') loadWatchlist();
   if(t === 'etf') loadEtf();
+  if(t === 'chips') loadChips();
 }
 
 // ==================== 自訂規則 ====================
@@ -2417,6 +2447,108 @@ async function loadEtfDetail(){
       }).join('');
     el.innerHTML=html;
   }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:12px">失敗 '+e+'</div>';}
+}
+
+
+// ==================== 籌碼追蹤（Sponsor）====================
+
+async function loadChips(){
+  if(typeof USER_ID==='undefined'||!USER_ID){alert('請先登入');return;}
+  loadGovBank();loadMoneyFlow();
+}
+
+async function loadGovBank(){
+  var el=document.getElementById('chipGov');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/chips/govbank').then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;font-size:13px;padding:8px">'+r.error+'</div>';return;}
+    var nc=r.today_net_yi>=0?'#1a7a52':'#d63b3b';
+    var html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<div><span style="font-weight:700;font-size:16px;color:'+nc+'">'+(r.today_net_yi>0?'+':'')+r.today_net_yi+'億</span>'+
+      '<span style="font-size:12px;color:#888;margin-left:8px">今日淨買賣'+(r.buy_streak_days>=2?'，連買 '+r.buy_streak_days+' 日':'')+'</span></div>'+
+      '<span style="font-size:11px;color:#b5b5ae">資料:'+r.date+'</span></div>';
+    html+='<div style="display:flex;gap:4px;align-items:flex-end;height:44px;margin-bottom:10px">'+(r.trend||[]).map(function(t){
+      var h=Math.min(Math.abs(t.net_yi)*6+3,40),cc=t.net_yi>=0?'#1a7a52':'#d63b3b';
+      return'<div style="flex:1;text-align:center"><div style="height:'+h+'px;background:'+cc+';border-radius:2px;margin:0 auto;width:70%"></div><div style="font-size:9px;color:#aaa;margin-top:2px">'+t.date.slice(5)+'</div></div>';
+    }).join('')+'</div>';
+    function col(title,items,color){
+      if(!items||!items.length)return'';
+      return'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:'+color+';margin-bottom:4px">'+title+'</div>'+
+        items.slice(0,6).map(function(x){return'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid #f8f8f5"><span>'+x.ticker+'<span style="color:#aaa;font-size:10px;margin-left:4px">'+x.banks+'家行庫</span></span><span style="color:'+color+';font-weight:600">'+Math.abs(x.net_yi)+'億</span></div>';}).join('')+'</div>';
+    }
+    html+='<div style="display:flex;gap:14px">'+col('買超',r.top_buy,'#1a7a52')+col('賣超',r.top_sell,'#d63b3b')+'</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+async function loadMoneyFlow(){
+  var el=document.getElementById('chipFlow');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/chips/moneyflow').then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;font-size:13px;padding:8px">'+r.error+'</div>';return;}
+    var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">資料:'+r.date+'　占全市場成交金額比重（Δ=較前一日）</div>';
+    var maxP=Math.max.apply(null,(r.chains||[]).map(function(x){return x.pct;}))||1;
+    html+=(r.chains||[]).map(function(x){
+      var dv=x.delta,dtag=dv===null||dv===undefined?'':'<span style="font-size:10px;color:'+(dv>=0?'#1a7a52':'#d63b3b')+';margin-left:6px">'+(dv>0?'+':'')+dv+'</span>';
+      return'<div style="padding:5px 0;border-bottom:1px solid #f8f8f5"><div style="display:flex;justify-content:space-between;font-size:13px"><span>'+x.industry+dtag+'</span><span style="font-weight:600">'+x.pct+'%</span></div>'+
+        '<div style="height:4px;background:#f0f0ec;border-radius:2px;margin-top:3px"><div style="height:4px;width:'+Math.round(x.pct/maxP*100)+'%;background:#1a7a52;border-radius:2px"></div></div></div>';
+    }).join('');
+    if(r.rising&&r.rising.length){
+      html+='<div style="font-size:12px;color:#888;margin-top:8px">今日吸金增加最多：'+r.rising.map(function(x){return x.industry+'(+'+x.delta+')';}).join('、')+'</div>';
+    }
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+async function loadBranch(){
+  var t=document.getElementById('chipTicker').value.trim();
+  if(!t){alert('請輸入代號');return;}
+  var el=document.getElementById('chipBranch'),kb=document.getElementById('chipKbar');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:10px">分點載入中...</div>';
+  kb.innerHTML='<div style="color:#aaa;text-align:center;padding:6px;font-size:12px">分K載入中...</div>';
+  _loadKbar(t);
+  try{
+    var r=await fetch(API_BASE+'/chips/branch/'+t).then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;font-size:13px;padding:8px">'+r.error+'</div>';return;}
+    function fb(x){return x.foreign?'<span style="font-size:9px;background:#E6F1FB;color:#185FA5;padding:1px 5px;border-radius:5px;margin-left:4px">外資系</span>':'';}
+    var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">資料:'+r.date+(r.buy_concentration_pct?'　買超集中度(前15分點) '+r.buy_concentration_pct+'%':'')+'</div>';
+    if(r.streak_buyers&&r.streak_buyers.length){
+      html+='<div style="font-size:12px;font-weight:600;color:#0F6E56;margin-bottom:4px">近5日連續買超分點</div>'+
+        r.streak_buyers.slice(0,6).map(function(x){return'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid #f8f8f5"><span>'+x.branch+fb(x)+'<span style="color:#aaa;font-size:10px;margin-left:4px">'+x.pos_days+'/'+x.days+'日</span></span><span style="color:#1a7a52;font-weight:600">累計+'+x.cum_lots+'張</span></div>';}).join('');
+    }
+    function col(title,items,color){
+      if(!items||!items.length)return'';
+      return'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:'+color+';margin:8px 0 4px">'+title+'</div>'+
+        items.slice(0,8).map(function(x){return'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px solid #f8f8f5"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+x.branch+fb(x)+'</span><span style="color:'+color+';font-weight:600;flex-shrink:0;margin-left:6px">'+Math.abs(x.today_lots)+'張</span></div>';}).join('')+'</div>';
+    }
+    html+='<div style="display:flex;gap:14px">'+col('今日買超分點',r.top_buy,'#1a7a52')+col('今日賣超分點',r.top_sell,'#d63b3b')+'</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+async function _loadKbar(t){
+  var kb=document.getElementById('chipKbar');
+  try{
+    var r=await fetch(API_BASE+'/chips/kbar/'+t).then(x=>x.json());
+    if(r.error||!r.bars||!r.bars.length){kb.innerHTML='<div style="color:#aaa;font-size:11px;padding:4px">'+(r.error||'無分K')+'</div>';return;}
+    var bars=r.bars.filter(function(b){return b.c>0;});
+    var min=r.low,max=r.high,rg=(max-min)||1;
+    var W=640,H=110;
+    var pts=bars.map(function(b,i){
+      var x=(i/(bars.length-1))*W;
+      var y=H-8-((b.c-min)/rg)*(H-20);
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    var lc=r.last>=r.open?'#1a7a52':'#d63b3b';
+    kb.innerHTML='<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">'+
+      '<span style="font-weight:600">'+t+' 分時（'+r.date+'）</span>'+
+      '<span>開'+r.open+' 高'+r.high+' 低'+r.low+' <b style="color:'+lc+'">收'+r.last+'</b></span></div>'+
+      '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'+
+      '<polyline points="'+pts+'" fill="none" stroke="'+lc+'" stroke-width="1.6"/>'+
+      '</svg>';
+  }catch(e){kb.innerHTML='';}
 }
 
 </script>
