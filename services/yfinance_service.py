@@ -23,26 +23,57 @@ def is_tw_trading_hours() -> bool:
     return 900 <= t <= 1335
 
 async def get_tw_realtime_price(ticker: str) -> dict | None:
-    """盤中用 TWSE MIS API 取得即時價格"""
-    try:
-        url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_{ticker}.tw&json=1&delay=0"
-        async with httpx.AsyncClient(timeout=5, verify=False) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = r.json()
-        msg = data.get("msgArray", [])
-        if not msg:
-            url2 = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_{ticker}.tw&json=1&delay=0"
-            async with httpx.AsyncClient(timeout=5, verify=False) as client:
-                r2 = await client.get(url2, headers={"User-Agent": "Mozilla/5.0"})
-            data2 = r2.json()
-            msg = data2.get("msgArray", [])
-        if msg:
+    """即時價（多層備援）：TWSE MIS → Yahoo chart API
+    回傳 {current_price, source, price_time}（price_time 為台北時間 MM/DD HH:MM）"""
+    # 1) TWSE MIS（FIX: 必須帶 Referer；z 可能為 '-' 需安全轉型）
+    mis_headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        "Referer": "https://mis.twse.com.tw/stock/index.jsp",
+        "Accept": "application/json",
+    }
+    def _num(v):
+        try:
+            return float(v)
+        except:
+            return 0.0
+    for ex in ("tse", "otc"):
+        try:
+            url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex}_{ticker}.tw&json=1&delay=0"
+            async with httpx.AsyncClient(timeout=6, verify=False) as client:
+                r = await client.get(url, headers=mis_headers)
+            msg = r.json().get("msgArray", [])
+            if not msg:
+                continue
             item = msg[0]
-            price = float(item.get("z", item.get("y", 0)) or 0)
-            if price > 0:
-                return {"current_price": price, "source": "realtime"}
-    except:
-        pass
+            price = _num(item.get("z"))            # 最新成交價（盤中可能為 '-'）
+            if price <= 0:
+                price = _num(item.get("y"))        # 昨收
+            if price <= 0 and item.get("b"):
+                price = _num(str(item["b"]).split("_")[0])  # 最佳買價
+            if price <= 0:
+                continue
+            d = str(item.get("d", ""))
+            t = str(item.get("t", ""))[:5]
+            ptime = f"{d[4:6]}/{d[6:8]} {t}" if len(d) == 8 else t
+            return {"current_price": round(price, 2), "source": "TWSE即時", "price_time": ptime}
+        except Exception:
+            continue
+    # 2) Yahoo v8 chart（伺服器端穩定，帶最後成交時間戳）
+    for suffix in (".TW", ".TWO"):
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}{suffix}?interval=1m&range=1d"
+            async with httpx.AsyncClient(timeout=8) as client:
+                r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            meta = r.json()["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice")
+            ts    = meta.get("regularMarketTime")
+            if not price:
+                continue
+            tw_tz = timezone(timedelta(hours=8))
+            ptime = datetime.fromtimestamp(ts, tw_tz).strftime("%m/%d %H:%M") if ts else ""
+            return {"current_price": round(float(price), 2), "source": "Yahoo即時", "price_time": ptime}
+        except Exception:
+            continue
     return None
 
 def calculate_ma(prices: pd.Series, period: int):
