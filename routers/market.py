@@ -1,7 +1,7 @@
 import os
 import asyncio
 from fastapi import APIRouter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 from database import db
 
@@ -43,10 +43,17 @@ def _yf_data(ticker: str) -> dict | None:
         rsv = (closes - lo9) / (hi9 - lo9) * 100
         k   = rsv.ewm(com=2).mean()
         d   = k.ewm(com=2).mean()
+        try:
+            bar = hist.index[-1]
+            bar = bar.tz_convert("Asia/Taipei") if bar.tzinfo else bar
+            bar_date = bar.strftime("%m/%d")
+        except Exception:
+            bar_date = ""
         return {
             "current": cur, "change_pct": chg, "rsi": rsi,
             "kd": {"k": round(float(k.iloc[-1]), 1), "d": round(float(d.iloc[-1]), 1)},
             "closes": closes.tolist()[-60:],
+            "bar_date": bar_date,
         }
     except Exception as e:
         print(f"[yf] {ticker}: {e}")
@@ -100,6 +107,16 @@ async def _fm_total(dataset: str, days: int = 30) -> list:
         raise Exception(f"FinMind {dataset}: {j.get('msg', 'unknown')}")
     return j.get("data", [])
 
+def _tw_last_trading_label() -> str:
+    """推算台股最近交易日（14:00 前視為前一交易日收盤資料）"""
+    now = datetime.now(timezone(timedelta(hours=8)))
+    d = now
+    if d.weekday() >= 5 or (now.hour * 60 + now.minute) < 14 * 60:
+        d = d - timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+    return d.strftime("%m/%d") + " 收盤"
+
 def _to_yi(raw: float) -> float:
     for div in (1e8, 1e5):
         v = raw / div
@@ -129,7 +146,7 @@ async def _margin_trend_data() -> dict | None:
     latest = history[-1]
     return {"balance": latest["balance"], "change_pct": latest["change_pct"],
             "trend": "增加" if latest["change_pct"] > 0 else "減少",
-            "history": history}
+            "history": history, "data_date": latest["date"]}
 
 # ── TWSE OpenAPI（STOCK_DAY_ALL 替代方案）────────────────────────
 
@@ -205,6 +222,7 @@ async def get_indices():
             "name": INTL_INDICES[key]["name"], "current": data["current"],
             "change_pct": data["change_pct"], "rsi": data["rsi"],
             "kd": data["kd"], "divergence": div, "vix_status": vix_status,
+            "data_date": data.get("bar_date", ""),
         }
     return {"indices": results, "updated_at": datetime.utcnow().isoformat()}
 
@@ -217,7 +235,8 @@ async def get_tw_market():
             tw_index = {"name": "台股加權指數",
                         "current": round(data["current"], 0),
                         "change_pct": data["change_pct"],
-                        "rsi": data["rsi"], "kd": data["kd"]}
+                        "rsi": data["rsi"], "kd": data["kd"],
+                        "data_date": data.get("bar_date", "")}
     except Exception as e:
         print(f"[market] TWII: {e}")
 
@@ -240,7 +259,8 @@ async def get_tw_market():
             ratio = round(up / down, 2) if down > 0 else 99
             breadth = {"up": up, "down": down, "flat": flat,
                        "limit_up": limit_up, "limit_down": limit_down, "ratio": ratio,
-                       "breadth": "強勢" if ratio > 2 else "弱勢" if ratio < 0.5 else "平衡"}
+                       "breadth": "強勢" if ratio > 2 else "弱勢" if ratio < 0.5 else "平衡",
+                       "data_date": _tw_last_trading_label()}
     except Exception as e:
         print(f"[market] breadth: {e}")
 
@@ -248,7 +268,8 @@ async def get_tw_market():
     try:
         mt = await _margin_trend_data()
         if mt:
-            margin = {"balance": mt["balance"], "change_pct": mt["change_pct"], "trend": mt["trend"]}
+            margin = {"balance": mt["balance"], "change_pct": mt["change_pct"], "trend": mt["trend"],
+                      "data_date": mt["history"][-1]["date"] if mt.get("history") else ""}
     except Exception as e:
         print(f"[market] margin: {e}")
 
@@ -329,7 +350,7 @@ async def get_sector_strength():
             if len(stocks) >= 2:
                 results.append(_calc_score(sector_name, stocks, tvol))
         results.sort(key=lambda x: x["strength_score"], reverse=True)
-        return {"sectors": results}
+        return {"sectors": results, "data_date": _tw_last_trading_label()}
     except Exception as e:
         return {"error": str(e), "sectors": []}
 
