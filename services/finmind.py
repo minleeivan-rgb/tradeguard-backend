@@ -327,3 +327,105 @@ async def get_tw_institutional() -> dict | None:
     except Exception as e:
         print(f"[FinMind] Institutional error: {e}")
         return None
+
+
+async def get_tw_institutional_detail() -> dict | None:
+    """三大法人各別買賣超（外資/投信/自營商）"""
+    try:
+        start = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanStockInstitutionalInvestors",
+                  "data_id": "整體市場",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        latest_date = rows[-1]["date"]
+        today_rows  = [r for r in rows if r["date"] == latest_date]
+
+        result = {"date": latest_date}
+        for row in today_rows:
+            name = row.get("name", "")
+            net  = float(row.get("buy", 0)) - float(row.get("sell", 0))
+            if "外陸資" in name or "外資自" in name or ("外" in name and "自營" not in name and "投信" not in name):
+                result["foreign_net"]   = net
+                result["foreign_trend"] = "買超" if net > 0 else "賣超"
+            elif "投信" in name:
+                result["trust_net"]     = net
+                result["trust_trend"]   = "買超" if net > 0 else "賣超"
+            elif "自營" in name:
+                result["dealer_net"]    = net
+                result["dealer_trend"]  = "買超" if net > 0 else "賣超"
+        return result
+    except Exception as e:
+        print(f"[FinMind] institutional detail error: {e}")
+        return None
+
+
+async def get_tw_margin_trend(days: int = 20) -> dict | None:
+    """融資餘額近期趨勢（含歷史數列）"""
+    try:
+        start = (datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanStockMarginPurchaseShortSale",
+                  "data_id": "整體市場",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        rows = rows[-days:]  # 取最近 N 天
+
+        history = []
+        for i, row in enumerate(rows):
+            bal = float(row.get("MarginPurchaseBalanceAmount", 0))
+            prev_bal = float(rows[i-1].get("MarginPurchaseBalanceAmount", bal)) if i > 0 else bal
+            chg_pct = round((bal - prev_bal) / prev_bal * 100, 2) if prev_bal else 0
+            history.append({
+                "date": row["date"],
+                "balance": round(bal / 1e8, 2),
+                "change_pct": chg_pct,
+            })
+
+        latest = history[-1]
+        return {
+            "balance":    latest["balance"],
+            "change_pct": latest["change_pct"],
+            "trend":      "增加" if latest["change_pct"] > 0 else "減少",
+            "history":    history,
+        }
+    except Exception as e:
+        print(f"[FinMind] margin trend error: {e}")
+        return None
+
+
+async def get_tw_futures_data(days: int = 60) -> dict | None:
+    """台指期 TX 日線（修正欄位名稱）"""
+    try:
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        end   = datetime.now().strftime("%Y-%m-%d")
+        params = {"dataset": "TaiwanFuturesDaily", "data_id": "TX",
+                  "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(FINMIND_BASE, params=params)
+        rows = r.json().get("data", [])
+        if not rows:
+            return None
+        rows = sorted(rows, key=lambda x: x["date"])
+        latest = rows[-1]
+        prev   = rows[-2] if len(rows) > 1 else rows[-1]
+        # 嘗試多種欄位名稱
+        close_fields = ["close", "Close", "settlement_price", "SettlementPrice", "close_price"]
+        close_val  = next((float(latest[f]) for f in close_fields if f in latest and latest[f]), 0)
+        prev_val   = next((float(prev[f]) for f in close_fields if f in prev and prev[f]), close_val)
+        change_pct = round((close_val - prev_val) / prev_val * 100, 2) if prev_val else 0
+        return {"name": "台指期 TX", "current": round(close_val, 0),
+                "change_pct": change_pct, "date": latest.get("date")}
+    except Exception as e:
+        print(f"[FinMind] Futures error: {e}")
+        return None
