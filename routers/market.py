@@ -237,6 +237,24 @@ async def get_tw_market():
                         "change_pct": data["change_pct"],
                         "rsi": data["rsi"], "kd": data["kd"],
                         "data_date": data.get("bar_date", "")}
+            # Sponsor 即時：snapshot 001 覆蓋盤中點位
+            try:
+                async with httpx.AsyncClient(timeout=5) as _c:
+                    _r = await _c.get(FINMIND_BASE, params={
+                        "dataset": "taiwan_stock_tick_snapshot",
+                        "data_id": "001", "token": FINMIND_TOKEN})
+                _j = _r.json()
+                if _j.get("status") == 200 and _j.get("data"):
+                    _it = _j["data"][-1]
+                    _px = float(_it.get("close", 0) or 0)
+                    if _px > 0:
+                        prev = data["closes"][-2] if len(data["closes"]) >= 2 else _px
+                        tw_index["current"] = round(_px, 0)
+                        tw_index["change_pct"] = round((_px - prev) / prev * 100, 2) if prev else 0
+                        _dt = str(_it.get("date", ""))
+                        tw_index["data_date"] = (_dt[5:16].replace("-", "/") if len(_dt) >= 16 else _dt) + " 即時"
+            except Exception:
+                pass
     except Exception as e:
         print(f"[market] TWII: {e}")
 
