@@ -8,6 +8,7 @@ Sponsor 籌碼套件
         TaiwanstockGovernmentBankBuySell / TaiwanStockIndustryChainMoneyFlow
 """
 import os
+import re
 from fastapi import APIRouter
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -73,8 +74,35 @@ async def branch_chips(ticker: str, days: int = 5):
         if not got:
             return {"error": "近期無分點資料（每日約 21:00 後更新）"}
         got.sort()
+
+        # 涵蓋率：分點總買進股數 vs 當日成交量（FinMind 盤後漸進更新，未滿70%視為不完整）
+        vol_map = {}
+        try:
+            vs = (datetime.now(TW_TZ) - timedelta(days=16)).strftime("%Y-%m-%d")
+            vrows = await _fm("TaiwanStockPrice", vs, datetime.now(TW_TZ).strftime("%Y-%m-%d"), ticker)
+            for x in vrows:
+                vol_map[x["date"]] = float(x.get("Trading_Volume", 0) or 0)
+        except Exception:
+            pass
+
+        def _cov(ds, rows):
+            tot = sum(float(r.get("buy", 0) or 0) for r in rows)
+            v = vol_map.get(ds)
+            return (tot / v) if v and v > 0 else None
+
+        partial_note = None
+        while len(got) > 1:
+            cv = _cov(got[-1][0], got[-1][1])
+            if cv is not None and cv < 0.7:
+                partial_note = (f"{got[-1][0]} 分點資料僅更新約 {round(cv*100)}%"
+                                f"（FinMind 盤後漸進爬取，約 21:00 後完整）— 已改顯示 {got[-2][0]} 完整資料")
+                got.pop()
+            else:
+                break
+
         dates = [g[0] for g in got]
         latest = dates[-1]
+        cov_latest = _cov(latest, got[-1][1])
 
         agg = {}
         total_buy_today = 0.0
@@ -125,6 +153,8 @@ async def branch_chips(ticker: str, days: int = 5):
                 "top_buy": top_buy, "top_sell": top_sell,
                 "streak_buyers": streak_list[:10],
                 "buy_concentration_pct": conc,
+                "coverage_pct": round(cov_latest * 100, 1) if cov_latest is not None else None,
+                "partial_note": partial_note,
                 "note": "連買=近5日中>=4日淨買超；外資系依券商名稱判斷；每日約21:00後更新"}
     except Exception as e:
         return {"error": str(e)}
@@ -162,20 +192,45 @@ async def kbar(ticker: str, date: str = ""):
     except Exception as e:
         return {"error": str(e)}
 
+
+async def _discover_datasets(keywords: list) -> list:
+    """故意打錯 dataset 讓 API 吐出完整合法清單，撈出含關鍵字的名稱"""
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            r = await c.get(FM_DATA, params={"dataset": "___probe___",
+                                             "start_date": "2026-01-01",
+                                             "token": FINMIND_TOKEN})
+        txt = r.text
+        names = re.findall(r"'([A-Za-z0-9]+)'", txt)
+        hits = []
+        for n in names:
+            low = n.lower()
+            if any(k in low for k in keywords) and n not in hits:
+                hits.append(n)
+        return hits
+    except Exception:
+        return []
+
 @router.get("/govbank")
 async def govbank():
     """八大行庫買賣（國安基金動向代理）"""
     try:
         start = (datetime.now(TW_TZ) - timedelta(days=16)).strftime("%Y-%m-%d")
+        candidates = ["TaiwanStockGovernmentBankBuySell", "TaiwanstockGovernmentBankBuySell"]
+        candidates += [n for n in await _discover_datasets(["government", "govbank"])
+                       if n not in candidates]
+        candidates += [n for n in await _discover_datasets(["bank"])
+                       if "buy" in n.lower() and n not in candidates]
         rows, last_err = None, None
-        for ds_name in ("TaiwanStockGovernmentBankBuySell", "TaiwanstockGovernmentBankBuySell"):
+        for ds_name in candidates:
             try:
                 rows = await _fm(ds_name, start)
-                break
+                if rows:
+                    break
             except Exception as e:
                 last_err = e
         if rows is None:
-            return {"error": str(last_err)}
+            return {"error": f"八大行庫資料集全部嘗試失敗（試了 {candidates}）：{last_err}"}
         if not rows:
             return {"error": "無八大行庫資料"}
         by_date = {}
@@ -292,9 +347,9 @@ async def chips_debug():
     out["daily_report_endpoint"] = await _raw(
         "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report",
         {"data_id": "2330", "date": _last_weekday_str(), "token": FINMIND_TOKEN}, False)
-    for nm, ds_name in [("govbank_S", "TaiwanStockGovernmentBankBuySell"),
-                        ("govbank_s", "TaiwanstockGovernmentBankBuySell")]:
-        out[nm] = await _raw(FM_DATA,
+    out["gov_dataset_candidates"] = await _discover_datasets(["government", "bank"])
+    for ds_name in (out["gov_dataset_candidates"] or ["TaiwanStockGovernmentBankBuySell"])[:3]:
+        out[f"govbank_{ds_name[:24]}"] = await _raw(FM_DATA,
             {"dataset": ds_name,
              "start_date": (now - timedelta(days=16)).strftime("%Y-%m-%d"), "token": FINMIND_TOKEN})
     out["moneyflow"] = await _raw(FM_DATA,
