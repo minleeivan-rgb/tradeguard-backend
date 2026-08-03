@@ -1986,6 +1986,130 @@ function _mrmargintrend(data){
   el.innerHTML=rows.join('');
 }
 
+
+// ==================== 大盤雷達：資料時間標注版（覆蓋前版）====================
+function _dt(s){return s?'<span style="font-size:10px;color:#b5b5ae;margin-left:6px">資料:'+s+'</span>':'';}
+
+async function loadMarketRadar(){
+  if(typeof USER_ID==='undefined'||!USER_ID){alert('請先登入');return;}
+  var u=document.getElementById('marketUpdatedAt');
+  if(u)u.textContent='載入中...';
+  var [a,b,c,d,e,f,g]=await Promise.allSettled([
+    fetch(API_BASE+'/market/indices').then(r=>r.json()),
+    fetch(API_BASE+'/market/tw').then(r=>r.json()),
+    fetch(API_BASE+'/market/sectors').then(r=>r.json()),
+    fetch(API_BASE+'/market/holdings-divergence/'+USER_ID).then(r=>r.json()),
+    fetch(API_BASE+'/market/margin-health/'+USER_ID).then(r=>r.json()),
+    fetch(API_BASE+'/market/institutional').then(r=>r.json()),
+    fetch(API_BASE+'/market/margin-trend').then(r=>r.json()),
+  ]);
+  if(u)u.textContent='抓取時間 '+new Date().toLocaleTimeString('zh-TW')+'（各卡片右側標示資料的台股時間）';
+  if(a.status==='fulfilled'){_mrvix(a.value.indices||{});_mridx(a.value.indices||{});_mrdivalert(a.value.indices||{});}
+  if(b.status==='fulfilled'){_mrtw(b.value);_mrstructure(b.value);}
+  if(c.status==='fulfilled')_mrsec(c.value);
+  if(d.status==='fulfilled')_mrdivs(d.value.stocks||[]);
+  if(e.status==='fulfilled')_mrmh(e.value.holdings||[]);
+  if(f.status==='fulfilled')_mrinst(f.value);
+  if(g.status==='fulfilled')_mrmargintrend(g.value);
+}
+
+function _mridx(x){
+  var el=document.getElementById('marketIndices');if(!el)return;
+  el.innerHTML=['sp500','nasdaq','sox','nikkei','kospi','usdtwd'].map(function(k){
+    var d=x[k];if(!d)return'<div class="card" style="opacity:.4">'+k+'</div>';
+    return'<div class="card"><div style="font-size:12px;color:#aaa">'+d.name+_dt(d.data_date)+'</div>'+
+      '<div style="font-size:18px;font-weight:700;margin:2px 0">'+Number(d.current).toLocaleString()+'</div>'+
+      '<div>'+_rc(d.change_pct)+'</div><div style="margin-top:4px">'+_rk(d.rsi,d.kd)+'</div>'+_rdiv(d.divergence)+'</div>';
+  }).join('');
+}
+
+function _mrtw(data){
+  var el=document.getElementById('marketTW');if(!el||!data)return;
+  var rows=[],tw=data.tw_index,fut=data.tw_futures;
+  if(tw&&tw.current)rows.push('<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0ec">'+
+    '<div><span style="font-weight:600">加權指數</span>'+_dt(tw.data_date)+'</div>'+
+    '<div style="text-align:right"><span style="font-size:16px;font-weight:700">'+Number(tw.current).toLocaleString()+'</span> '+_rc(tw.change_pct)+
+    '<div style="margin-top:2px">'+_rk(tw.rsi,tw.kd)+'</div></div></div>');
+  if(fut&&fut.current)rows.push('<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0ec">'+
+    '<div><span style="font-weight:600">台指期 TX</span>'+_dt(fut.date)+'</div>'+
+    '<div>'+Number(fut.current).toLocaleString()+' '+_rc(fut.change_pct)+'</div></div>');
+  var mg=data.margin;
+  if(mg)rows.push('<div style="display:flex;justify-content:space-between;padding:8px 0">'+
+    '<div><span style="font-weight:600">融資餘額</span>'+_dt(mg.data_date)+'</div>'+
+    '<div>'+mg.balance+'億 <span style="color:'+(mg.change_pct>0?'#d63b3b':'#1a7a52')+';font-size:12px">'+mg.trend+' '+(mg.change_pct>0?'+':'')+mg.change_pct+'%</span></div></div>');
+  el.innerHTML=rows.join('')||'<div style="color:#aaa;text-align:center;padding:12px">資料取得中...</div>';
+}
+
+function _mrstructure(data){
+  var el=document.getElementById('marketStructure');if(!el||!data)return;
+  var br=data.breadth,rows=[];
+  if(br){
+    var bc=br.ratio>2?'#1a7a52':br.ratio<0.5?'#d63b3b':'#888';
+    rows.push('<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0ec">'+
+    '<div><span style="font-weight:600">漲跌家數</span>'+_dt(br.data_date)+'</div>'+
+    '<div><span style="color:#1a7a52">'+br.up+'↑</span>/<span style="color:#d63b3b">'+br.down+'↓</span> 漲停<b>'+br.limit_up+'</b>/跌停<b>'+br.limit_down+'</b> <span style="color:'+bc+';font-size:12px">['+br.breadth+']</span></div></div>');
+    var tot=br.up+br.down+(br.flat||0),upPct=tot>0?Math.round(br.up/tot*100):0;
+    rows.push('<div style="padding:8px 0"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:12px;color:#888">上漲比率</span><span style="font-size:12px;font-weight:600">'+upPct+'%</span></div><div style="height:8px;background:#f0f0ec;border-radius:4px"><div style="height:8px;width:'+upPct+'%;background:#1a7a52;border-radius:4px"></div></div></div>');
+  }
+  el.innerHTML=rows.join('')||'<div style="color:#aaa;text-align:center;padding:12px">資料取得中...</div>';
+}
+
+function _mrsec(resp){
+  var el=document.getElementById('marketSectors');if(!el)return;
+  var s=(resp&&resp.sectors)?resp.sectors:(Array.isArray(resp)?resp:[]);
+  var dd=(resp&&resp.data_date)?resp.data_date:'';
+  if(!s.length){el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">'+((resp&&resp.error)||'無資料')+'</div>';return;}
+  var head=dd?'<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">資料日期：'+dd+'</div>':'';
+  el.innerHTML=head+s.slice(0,10).map(function(x,i){
+    var bw=Math.min(x.strength_score*100,100),cc=x.avg_change_pct>0?'#1a7a52':'#d63b3b';
+    return'<div style="padding:7px 0;border-bottom:1px solid #f8f8f5"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;font-weight:'+(i<3?700:400)+'">'+(i+1)+'. '+x.sector+'</span><span style="color:'+cc+';font-weight:600;font-size:13px">'+(x.avg_change_pct>0?'+':'')+x.avg_change_pct+'%</span></div><div style="height:4px;background:#f0f0ec;border-radius:2px"><div style="height:4px;width:'+bw+'%;background:'+cc+';border-radius:2px"></div></div></div>';
+  }).join('');
+}
+
+function _mrinst(data){
+  var el=document.getElementById('marketInstitutional');if(!el||!data)return;
+  if(data.error){el.innerHTML='<div style="color:#d63b3b;font-size:12px;padding:8px">'+data.error+'</div>';return;}
+  var unitNote=(data.source==='t86')?'（備援來源，單位:股）':'';
+  var rows=['<div style="font-size:11px;color:#b5b5ae;margin-bottom:4px">資料日期：'+(data.date||'')+unitNote+'</div>'];
+  function row(label,net,trend){
+    var c=net>0?'#1a7a52':'#d63b3b';
+    return'<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0ec"><div><span style="font-weight:600">'+label+'</span></div><div style="color:'+c+';font-weight:600">'+(net>0?'+':'')+(Math.round(net/1e8*100)/100)+'億 ('+trend+')</div></div>';
+  }
+  if(data.foreign_net!==undefined)rows.push(row('外資',data.foreign_net,data.foreign_trend));
+  if(data.trust_net!==undefined)rows.push(row('投信',data.trust_net,data.trust_trend));
+  if(data.dealer_net!==undefined)rows.push(row('自營商',data.dealer_net,data.dealer_trend));
+  el.innerHTML=rows.join('');
+}
+
+function _mrmargintrend(data){
+  var el=document.getElementById('marketMarginTrend');if(!el||!data)return;
+  if(data.error){el.innerHTML='<div style="color:#d63b3b;font-size:12px;padding:8px">'+data.error+'</div>';return;}
+  var h=data.history||[];if(!h.length){el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">無資料</div>';return;}
+  var latest=h[h.length-1],tc=data.change_pct>0?'#d63b3b':'#1a7a52';
+  var rows=['<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0ec"><div><span style="font-weight:600">融資餘額</span>'+_dt(data.data_date)+'</div><div><span style="font-size:16px;font-weight:700">'+latest.balance+'億</span> <span style="color:'+tc+';font-size:12px">'+(data.change_pct>0?'+':'')+data.change_pct+'% '+data.trend+'</span></div></div>'];
+  var maxB=Math.max.apply(null,h.map(function(x){return x.balance;}));
+  rows.push('<div style="margin-top:8px"><div style="font-size:11px;color:#aaa;margin-bottom:4px">近期趨勢（'+h.length+'個交易日）</div>'+
+    h.slice(-7).map(function(x){
+      var pct=maxB>0?Math.round(x.balance/maxB*100):0,bc=x.change_pct>0?'#d63b3b':'#1a7a52';
+      return'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="font-size:10px;color:#aaa;width:55px;flex-shrink:0">'+String(x.date).slice(5)+'</span><div style="flex:1;height:6px;background:#f0f0ec;border-radius:3px"><div style="height:6px;width:'+pct+'%;background:'+bc+';border-radius:3px"></div></div><span style="font-size:11px;color:#888;width:52px;text-align:right">'+x.balance+'億</span></div>';
+    }).join('')+'</div>');
+  el.innerHTML=rows.join('');
+}
+
+function _mrdivalert(x){
+  var el=document.getElementById('marketDivAlert');if(!el)return;
+  var alerts=[];
+  ['taiex','sp500','nasdaq','sox','nikkei','kospi'].forEach(function(k){
+    var d=x[k];if(!d||!d.divergence||d.divergence.type==='none')return;
+    var c=d.divergence.type==='bearish'?'#d63b3b':'#1a7a52',l=d.divergence.type==='bearish'?'頂背離':'底背離';
+    alerts.push('<div style="padding:8px 0;border-bottom:1px solid #f0f0ec"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">'+d.name+_dt(d.data_date)+'</span><span style="color:'+c+';font-size:12px;font-weight:600">'+l+'</span></div><div style="font-size:12px;color:#666;margin-top:3px;line-height:1.6">'+d.divergence.signal+'</div></div>');
+  });
+  var vix=x.vix;
+  if(vix&&vix.current>=30)alerts.push('<div style="padding:8px 0;border-bottom:1px solid #f0f0ec"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">VIX 極度恐慌'+_dt(vix.data_date)+'</span><span style="color:#d63b3b;font-size:12px;font-weight:600">警示</span></div><div style="font-size:12px;color:#666;margin-top:3px">VIX='+vix.current+'，市場極度恐慌，槓桿部位注意系統性風險</div></div>');
+  else if(vix&&vix.current>=20)alerts.push('<div style="padding:8px 0;border-bottom:1px solid #f0f0ec"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">VIX 偏高'+_dt(vix.data_date)+'</span><span style="color:#c97c0a;font-size:12px;font-weight:600">注意</span></div><div style="font-size:12px;color:#666;margin-top:3px">VIX='+vix.current+'，市場情緒偏恐慌</div></div>');
+  el.innerHTML=alerts.length?alerts.join(''):'<div style="color:#1a7a52;text-align:center;padding:12px">目前六大指數（台/美/日/韓）皆無背離訊號</div>';
+}
+
 </script>
 </body>
 </html>
