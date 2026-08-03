@@ -11,6 +11,7 @@ FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
 FINMIND_BASE  = "https://api.finmindtrade.com/api/v4/data"
 
 INTL_INDICES = {
+    "taiex":  {"ticker": "^TWII",    "name": "台股加權"},
     "sp500":  {"ticker": "^GSPC",    "name": "S&P 500"},
     "nasdaq": {"ticker": "^IXIC",    "name": "NASDAQ"},
     "sox":    {"ticker": "^SOX",     "name": "費半 SOX"},
@@ -51,22 +52,44 @@ def _yf_data(ticker: str) -> dict | None:
         print(f"[yf] {ticker}: {e}")
         return None
 
-def _divergence(closes: list, rsi: float) -> dict:
+def _divergence(closes: list, rsi: float, kd_k: float, name: str = "") -> dict:
+    """背離偵測（詳細版）：
+    頂背離 = 價格進入近60日高點區，但 RSI 未同步走高（動能不足）
+    底背離 = 價格接近近60日低點區，但 RSI 未再破低（賣壓竭盡）
+    """
     if len(closes) < 20:
         return {"type": "none", "signal": None}
     peak    = max(closes)
     trough  = min(closes)
     current = closes[-1]
+    dist_peak   = round((current - peak) / peak * 100, 1)
+    dist_trough = round((current - trough) / trough * 100, 1)
+
     if current >= peak * 0.97 and rsi < 65:
-        return {"type": "bearish", "signal": f"接近近期高點但 RSI={rsi} 動能不足，注意風險"}
+        return {
+            "type": "bearish",
+            "signal": (
+                f"現價 {current:,.2f} 已進入近60日高點區（距高點 {dist_peak:+.1f}%），"
+                f"但 RSI 僅 {rsi}、K值 {kd_k} 未同步走高 → 價格創高、動能未跟上，"
+                f"為典型頂背離。依你的規則「指數創高但指標未創高＝下」屬偏空警訊，"
+                f"建議：檢視持股停利位置、此區不追高，若跌破短均線考慮減碼"
+            ),
+        }
     if current <= trough * 1.03 and rsi > 35:
-        return {"type": "bullish", "signal": f"接近近期低點但 RSI={rsi} 動能回升，可能反彈"}
+        return {
+            "type": "bullish",
+            "signal": (
+                f"現價 {current:,.2f} 接近近60日低點區（距低點 {dist_trough:+.1f}%），"
+                f"但 RSI {rsi} 未再破低 → 賣壓竭盡的底背離。"
+                f"依你的規則「指數創低但指標未破低＝上」屬偏多訊號，"
+                f"可留意止跌K棒確認後的反彈進場機會"
+            ),
+        }
     return {"type": "none", "signal": None}
 
-# ── FinMind 整體市場資料（自帶，正確資料集）──────────────────────
+# ── FinMind 整體市場（Total 資料集）──────────────────────────────
 
 async def _fm_total(dataset: str, days: int = 30) -> list:
-    """整體市場專用資料集，不需要 data_id"""
     start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     end   = datetime.now().strftime("%Y-%m-%d")
     params = {"dataset": dataset, "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
@@ -78,7 +101,6 @@ async def _fm_total(dataset: str, days: int = 30) -> list:
     return j.get("data", [])
 
 def _to_yi(raw: float) -> float:
-    """自動判斷單位（元或仟元）換算成億"""
     for div in (1e8, 1e5):
         v = raw / div
         if 100 <= v <= 100000:
@@ -92,7 +114,6 @@ def _safe_float(s):
         return 0
 
 async def _margin_trend_data() -> dict | None:
-    """融資餘額趨勢（FinMind TaiwanStockTotalMarginPurchaseShortSale）"""
     rows = await _fm_total("TaiwanStockTotalMarginPurchaseShortSale", days=45)
     m = [r for r in rows if r.get("name") == "MarginPurchaseMoney"]
     m.sort(key=lambda x: x["date"])
@@ -110,22 +131,78 @@ async def _margin_trend_data() -> dict | None:
             "trend": "增加" if latest["change_pct"] > 0 else "減少",
             "history": history}
 
+# ── TWSE OpenAPI（STOCK_DAY_ALL 替代方案）────────────────────────
+
+_openapi_cache = {"date": None, "data": {}}
+
+async def _twse_openapi_perf() -> dict:
+    """全市場收盤資料 via openapi.twse.com.tw（官方開放資料，無防爬）"""
+    global _openapi_cache
+    today = datetime.now().strftime("%Y%m%d")
+    if _openapi_cache["date"] == today and _openapi_cache["data"]:
+        return _openapi_cache["data"]
+
+    url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+    async with httpx.AsyncClient(timeout=25, verify=False) as c:
+        r = await c.get(url, headers={"User-Agent": "Mozilla/5.0",
+                                      "accept": "application/json"})
+    data = r.json()  # list of dicts
+    perf = {}
+    for it in data:
+        code = str(it.get("Code", "")).strip()
+        if not (code.isdigit() and 4 <= len(code) <= 5):
+            continue
+        close = _safe_float(it.get("ClosingPrice"))
+        chg   = _safe_float(it.get("Change"))
+        vol   = _safe_float(it.get("TradeVolume"))
+        prev  = close - chg
+        if close <= 0 or prev <= 0:
+            continue
+        chg_pct = round(chg / prev * 100, 2)
+        limit_price  = round(prev * 1.10, 2)
+        to_limit_pct = round((limit_price - close) / close * 100, 2)
+        perf[code] = {"name": it.get("Name", ""), "current_price": close,
+                      "change_pct": chg_pct, "volume": vol,
+                      "to_limit_pct": to_limit_pct}
+    if perf:
+        _openapi_cache.update({"date": today, "data": perf})
+    return perf
+
+async def _get_perf() -> dict:
+    """收盤資料：OpenAPI 為主，舊 rwd 端點備援"""
+    try:
+        perf = await _twse_openapi_perf()
+        if perf:
+            return perf
+    except Exception as e:
+        print(f"[market] openapi perf: {e}")
+    try:
+        from services.twse import fetch_twse_stock_performance
+        return await fetch_twse_stock_performance() or {}
+    except Exception as e:
+        print(f"[market] rwd perf: {e}")
+        return {}
+
 # ── Endpoints ────────────────────────────────────────────────────
 
 @router.get("/indices")
 async def get_indices():
+    keys  = list(INTL_INDICES.keys())
+    datas = await asyncio.gather(
+        *[asyncio.to_thread(_yf_data, INTL_INDICES[k]["ticker"]) for k in keys]
+    )
     results = {}
-    for key, info in INTL_INDICES.items():
-        data = await asyncio.to_thread(_yf_data, info["ticker"])
+    for key, data in zip(keys, datas):
         if not data:
             continue
-        div = _divergence(data["closes"], data["rsi"])
+        div = _divergence(data["closes"], data["rsi"], data["kd"]["k"],
+                          INTL_INDICES[key]["name"])
         vix_status = None
         if key == "vix":
             v = data["current"]
             vix_status = "danger" if v >= 30 else "warning" if v >= 20 else "normal"
         results[key] = {
-            "name": info["name"], "current": data["current"],
+            "name": INTL_INDICES[key]["name"], "current": data["current"],
             "change_pct": data["change_pct"], "rsi": data["rsi"],
             "kd": data["kd"], "divergence": div, "vix_status": vix_status,
         }
@@ -151,10 +228,9 @@ async def get_tw_market():
     except Exception as e:
         print(f"[market] futures: {e}")
 
-    breadth, breadth_err = None, None
+    breadth = None
     try:
-        from services.twse import fetch_twse_stock_performance
-        perf = await fetch_twse_stock_performance()
+        perf = await _get_perf()
         if perf:
             up   = sum(1 for v in perf.values() if v["change_pct"] > 0)
             down = sum(1 for v in perf.values() if v["change_pct"] < 0)
@@ -166,7 +242,6 @@ async def get_tw_market():
                        "limit_up": limit_up, "limit_down": limit_down, "ratio": ratio,
                        "breadth": "強勢" if ratio > 2 else "弱勢" if ratio < 0.5 else "平衡"}
     except Exception as e:
-        breadth_err = str(e)
         print(f"[market] breadth: {e}")
 
     margin = None
@@ -178,12 +253,11 @@ async def get_tw_market():
         print(f"[market] margin: {e}")
 
     return {"tw_index": tw_index, "tw_futures": tw_futures,
-            "breadth": breadth, "breadth_error": breadth_err, "margin": margin,
+            "breadth": breadth, "margin": margin,
             "updated_at": datetime.utcnow().isoformat()}
 
 @router.get("/institutional")
 async def get_institutional():
-    """三大法人：FinMind 整體資料集為主（金額/元），T86 為備援（股數）"""
     fm_err = None
     try:
         rows = await _fm_total("TaiwanStockTotalInstitutionalInvestors", days=10)
@@ -203,7 +277,6 @@ async def get_institutional():
     except Exception as e:
         fm_err = str(e)
 
-    # 備援：TWSE T86（單位是股數，索引已修正：外資=4、投信=10、自營=11）
     try:
         url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&selectType=ALL"
         async with httpx.AsyncClient(timeout=15, verify=False) as c:
@@ -236,11 +309,10 @@ async def get_margin_trend():
 @router.get("/sectors")
 async def get_sector_strength():
     try:
-        from services.twse import fetch_twse_stock_performance
         from routers.scan import TW_THEME_SECTORS, TW_STOCK_LIST, _calc_score
-        perf = await fetch_twse_stock_performance()
+        perf = await _get_perf()
         if not perf:
-            return {"error": "TWSE 回傳空資料", "sectors": []}
+            return {"error": "收盤資料取得失敗", "sectors": []}
         results = []
         for sector_name, tickers in TW_THEME_SECTORS.items():
             stocks, tvol = [], 0
@@ -297,11 +369,14 @@ async def get_holdings_divergence(user_id: str):
             continue
         rsi = tech.get("rsi", 50)
         kd  = tech.get("kd", {})
+        k_val = kd.get("k", 50)
         div = {"type": "none", "signal": None}
         if kd.get("overbought") and rsi < 65:
-            div = {"type": "bearish", "signal": "KD 超買但 RSI 動能不足，頂背離風險"}
+            div = {"type": "bearish",
+                   "signal": f"K值 {k_val} 已達超買區（>80）但 RSI 僅 {rsi} 未同步衝高 → 價格衝高、動能未跟上的頂背離，留意回檔壓力、檢視停利位"}
         elif kd.get("oversold") and rsi > 35:
-            div = {"type": "bullish", "signal": "KD 超賣但 RSI 回升，底背離反彈機會"}
+            div = {"type": "bullish",
+                   "signal": f"K值 {k_val} 已進超賣區（<20）但 RSI {rsi} 未再破低 → 賣壓竭盡的底背離，可留意止跌反彈的加碼時機"}
         results.append({"ticker": ticker, "name": h.get("name", ticker),
                         "current": tech["current_price"], "rsi": rsi, "kd": kd,
                         "direction": tech.get("direction", "中性"), "divergence": div})
@@ -309,7 +384,6 @@ async def get_holdings_divergence(user_id: str):
 
 @router.get("/debug")
 async def market_debug():
-    """診斷端點：測每個資料源，直接看是哪裡壞"""
     out = {"finmind_token_set": bool(FINMIND_TOKEN)}
 
     try:
@@ -319,39 +393,34 @@ async def market_debug():
         out["twii_yfinance"] = {"ok": False, "error": str(e)}
 
     try:
-        from services.twse import fetch_twse_stock_performance
-        perf = await fetch_twse_stock_performance()
-        out["twse_stock_day_all"] = {"ok": bool(perf), "rows": len(perf)}
+        perf = await _twse_openapi_perf()
+        out["twse_openapi"] = {"ok": bool(perf), "rows": len(perf)}
     except Exception as e:
-        out["twse_stock_day_all"] = {"ok": False, "error": str(e)}
+        out["twse_openapi"] = {"ok": False, "error": str(e)}
 
     try:
-        from routers.scan import TW_THEME_SECTORS, TW_STOCK_LIST, _calc_score
+        from services.twse import fetch_twse_stock_performance
+        perf = await fetch_twse_stock_performance()
+        out["twse_rwd_old"] = {"ok": bool(perf), "rows": len(perf)}
+    except Exception as e:
+        out["twse_rwd_old"] = {"ok": False, "error": str(e)}
+
+    try:
+        from routers.scan import TW_THEME_SECTORS
         out["scan_import"] = {"ok": True, "sector_count": len(TW_THEME_SECTORS)}
     except Exception as e:
         out["scan_import"] = {"ok": False, "error": str(e)}
 
     try:
         rows = await _fm_total("TaiwanStockTotalInstitutionalInvestors", days=7)
-        out["finmind_institutional"] = {"ok": True, "rows": len(rows),
-                                        "sample": rows[-1] if rows else None}
+        out["finmind_institutional"] = {"ok": True, "rows": len(rows)}
     except Exception as e:
         out["finmind_institutional"] = {"ok": False, "error": str(e)}
 
     try:
         rows = await _fm_total("TaiwanStockTotalMarginPurchaseShortSale", days=7)
-        out["finmind_margin"] = {"ok": True, "rows": len(rows),
-                                 "sample": rows[-1] if rows else None}
+        out["finmind_margin"] = {"ok": True, "rows": len(rows)}
     except Exception as e:
         out["finmind_margin"] = {"ok": False, "error": str(e)}
-
-    try:
-        url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&selectType=ALL"
-        async with httpx.AsyncClient(timeout=15, verify=False) as c:
-            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        j = r.json()
-        out["twse_t86"] = {"ok": j.get("stat") == "OK", "rows": len(j.get("data", []))}
-    except Exception as e:
-        out["twse_t86"] = {"ok": False, "error": str(e)}
 
     return out
