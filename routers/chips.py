@@ -48,57 +48,64 @@ async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) ->
 
 @router.get("/branch/{ticker}")
 async def branch_chips(ticker: str, days: int = 5):
-    """分點籌碼：近N日各券商分點買賣統計"""
+    """分點籌碼：官方單日分點端點，逐日抓近N個交易日彙總"""
     try:
-        start = (datetime.now(TW_TZ) - timedelta(days=days + 9)).strftime("%Y-%m-%d")
-        end   = datetime.now(TW_TZ).strftime("%Y-%m-%d")
-        params = {"data_id": ticker, "start_date": start, "end_date": end,
-                  "token": FINMIND_TOKEN}
-        async with httpx.AsyncClient(timeout=40) as c:
-            r = await c.get(FM_SECAGG, params=params,
-                            headers={"Authorization": f"Bearer {FINMIND_TOKEN}"})
-        try:
-            j = r.json()
-        except Exception:
-            return {"error": f"分點 HTTP {r.status_code}: {r.text[:200]}"}
-        try:
-            rows = _parse(j, "分點SecIdAgg")
-        except Exception as pe:
-            return {"error": str(pe)}
-        if not rows:
-            return {"error": "近期無分點資料"}
-
-        dates = sorted({r["date"] for r in rows})[-days:]
-        rows = [r for r in rows if r["date"] in dates]
+        url = "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report"
+        got = []
+        d = datetime.now(TW_TZ)
+        tries = 0
+        async with httpx.AsyncClient(timeout=40) as cli:
+            while len(got) < days and tries < days + 9:
+                if d.weekday() < 5:
+                    ds = d.strftime("%Y-%m-%d")
+                    r = await cli.get(url, params={"data_id": ticker, "date": ds,
+                                                   "token": FINMIND_TOKEN})
+                    try:
+                        rows = _parse(r.json(), f"分點 {ds}")
+                    except Exception as pe:
+                        if not got and tries > 4:
+                            return {"error": str(pe)}
+                        rows = []
+                    if rows:
+                        got.append((ds, rows))
+                d -= timedelta(days=1)
+                tries += 1
+        if not got:
+            return {"error": "近期無分點資料（每日約 21:00 後更新）"}
+        got.sort()
+        dates = [g[0] for g in got]
         latest = dates[-1]
 
-        # 彙整：branch → {daily net, 累計}
         agg = {}
-        for r in rows:
-            key = r.get("securities_trader_id", "")
-            name = r.get("securities_trader", key)
-            b = float(r.get("buy_volume", 0) or 0)
-            s = float(r.get("sell_volume", 0) or 0)
-            a = agg.setdefault(key, {"name": name, "daily": {}, "cum": 0.0,
-                                     "buy_price": None})
-            net = b - s
-            a["daily"][r["date"]] = a["daily"].get(r["date"], 0) + net
-            a["cum"] += net
-            if r["date"] == latest and b > 0 and r.get("buy_price"):
-                a["buy_price"] = float(r["buy_price"])
+        total_buy_today = 0.0
+        for ds, rows in got:
+            for r in rows:
+                key = str(r.get("securities_trader_id", "")) or str(r.get("securities_trader", ""))
+                name = r.get("securities_trader", key)
+                b = float(r.get("buy", 0) or 0)
+                s = float(r.get("sell", 0) or 0)
+                price = float(r.get("price", 0) or 0)
+                a = agg.setdefault(key, {"name": name, "daily": {}, "cum": 0.0,
+                                         "bp_num": 0.0, "bp_den": 0.0})
+                net = b - s
+                a["daily"][ds] = a["daily"].get(ds, 0) + net
+                a["cum"] += net
+                if ds == latest:
+                    if net > 0:
+                        total_buy_today += net
+                    if b > 0 and price > 0:
+                        a["bp_num"] += price * b
+                        a["bp_den"] += b
 
         today_list, streak_list = [], []
-        total_buy_today = 0.0
         for key, a in agg.items():
             tn = a["daily"].get(latest, 0)
-            if tn > 0:
-                total_buy_today += tn
-            pos_days = sum(1 for d in dates if a["daily"].get(d, 0) > 0)
+            pos_days = sum(1 for dd in dates if a["daily"].get(dd, 0) > 0)
             item = {"branch": a["name"], "foreign": _is_foreign(a["name"]),
                     "today_lots": round(tn / 1000, 0),
                     "cum_lots": round(a["cum"] / 1000, 0),
                     "pos_days": pos_days, "days": len(dates),
-                    "buy_price": a["buy_price"]}
+                    "buy_price": round(a["bp_num"] / a["bp_den"], 2) if a["bp_den"] > 0 else None}
             today_list.append(item)
             if pos_days >= max(3, len(dates) - 1) and a["cum"] > 0:
                 streak_list.append(item)
@@ -118,7 +125,7 @@ async def branch_chips(ticker: str, days: int = 5):
                 "top_buy": top_buy, "top_sell": top_sell,
                 "streak_buyers": streak_list[:10],
                 "buy_concentration_pct": conc,
-                "note": "連買=近5日中≥4日淨買超；外資系依券商名稱判斷"}
+                "note": "連買=近5日中>=4日淨買超；外資系依券商名稱判斷；每日約21:00後更新"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -160,7 +167,15 @@ async def govbank():
     """八大行庫買賣（國安基金動向代理）"""
     try:
         start = (datetime.now(TW_TZ) - timedelta(days=16)).strftime("%Y-%m-%d")
-        rows = await _fm("TaiwanstockGovernmentBankBuySell", start)
+        rows, last_err = None, None
+        for ds_name in ("TaiwanStockGovernmentBankBuySell", "TaiwanstockGovernmentBankBuySell"):
+            try:
+                rows = await _fm(ds_name, start)
+                break
+            except Exception as e:
+                last_err = e
+        if rows is None:
+            return {"error": str(last_err)}
         if not rows:
             return {"error": "無八大行庫資料"}
         by_date = {}
@@ -277,9 +292,11 @@ async def chips_debug():
     out["daily_report_endpoint"] = await _raw(
         "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report",
         {"data_id": "2330", "date": _last_weekday_str(), "token": FINMIND_TOKEN}, False)
-    out["govbank"] = await _raw(FM_DATA,
-        {"dataset": "TaiwanstockGovernmentBankBuySell",
-         "start_date": (now - timedelta(days=16)).strftime("%Y-%m-%d"), "token": FINMIND_TOKEN})
+    for nm, ds_name in [("govbank_S", "TaiwanStockGovernmentBankBuySell"),
+                        ("govbank_s", "TaiwanstockGovernmentBankBuySell")]:
+        out[nm] = await _raw(FM_DATA,
+            {"dataset": ds_name,
+             "start_date": (now - timedelta(days=16)).strftime("%Y-%m-%d"), "token": FINMIND_TOKEN})
     out["moneyflow"] = await _raw(FM_DATA,
         {"dataset": "TaiwanStockIndustryChainMoneyFlow",
          "start_date": _last_weekday_str(), "token": FINMIND_TOKEN})
