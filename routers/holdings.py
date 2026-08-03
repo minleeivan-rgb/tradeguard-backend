@@ -31,16 +31,32 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
             live = None
             if h["market"] == "tw":
                 from services.finmind import get_tw_stock_price
+                from services.yfinance_service import get_tw_realtime_price
                 live = await get_tw_stock_price(h["ticker"])
-                # 盤中補即時價
-                if live and is_tw_trading_hours():
-                    from services.yfinance_service import get_tw_realtime_price
-                    rt = await get_tw_realtime_price(h["ticker"])
-                    if rt:
-                        live["current_price"] = rt["current_price"]
+                # FIX: 任何時段都先抓即時價（TWSE MIS → Yahoo 雙備援），並記錄報價時間
+                rt = await get_tw_realtime_price(h["ticker"])
+                if rt and rt.get("current_price"):
+                    if not live:
+                        live = {"current_price": rt["current_price"], "highest_price": 0,
+                                "ma20": None, "ma60": None,
+                                "ma20_diff_pct": None, "ma60_diff_pct": None}
+                    live["current_price"] = rt["current_price"]
+                    live["price_time"]    = rt.get("price_time", "")
+                    live["price_source"]  = rt.get("source", "")
+                    # FIX: 用即時價重算均線乖離，避免顯示過期乖離造成誤判
+                    if live.get("ma20"):
+                        live["ma20_diff_pct"] = round((rt["current_price"] - live["ma20"]) / live["ma20"] * 100, 2)
+                    if live.get("ma60"):
+                        live["ma60_diff_pct"] = round((rt["current_price"] - live["ma60"]) / live["ma60"] * 100, 2)
+                elif live:
+                    live["price_time"]   = "最近收盤"
+                    live["price_source"] = "FinMind日線"
             else:
                 # FIX: get_stock_data 是同步函數，用 asyncio.to_thread 避免阻塞 event loop
                 live = await asyncio.to_thread(get_stock_data, h["ticker"], h["market"])
+                if live:
+                    live["price_time"]   = "最近收盤"
+                    live["price_source"] = "yfinance"
 
             if not live:
                 from services.twse import _twse_cache
@@ -68,7 +84,10 @@ async def get_holdings(user_id: str, refresh_prices: bool = False):
                                   "ma20": live["ma20"], "ma60": live["ma60"],
                                   "ma20_diff_pct": live["ma20_diff_pct"],
                                   "ma60_diff_pct": live["ma60_diff_pct"],
-                                  "status": status, "updated_at": datetime.utcnow().isoformat()}}
+                                  "status": status,
+                                  "price_time": live.get("price_time", ""),
+                                  "price_source": live.get("price_source", ""),
+                                  "updated_at": datetime.utcnow().isoformat()}}
                     )
                 # FIX: 過濾掉 raw_closes/raw_rows（幾百筆原始資料），避免 response 過大
                 safe_live = {k: v for k, v in live.items() if k not in ("raw_closes", "raw_rows")}
