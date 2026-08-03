@@ -1887,7 +1887,7 @@ function _mridx(x){
 function _mrdivalert(x){
   var el=document.getElementById('marketDivAlert');if(!el)return;
   var alerts=[];
-  ['sp500','nasdaq','sox'].forEach(function(k){
+  ['taiex','sp500','nasdaq','sox','nikkei','kospi'].forEach(function(k){
     var d=x[k];if(!d||!d.divergence||d.divergence.type==='none')return;
     var c=d.divergence.type==='bearish'?'#d63b3b':'#1a7a52',l=d.divergence.type==='bearish'?'頂背離':'底背離';
     alerts.push('<div style="padding:8px 0;border-bottom:1px solid #f0f0ec"><div style="display:flex;justify-content:space-between"><span style="font-weight:600">'+d.name+'</span><span style="color:'+c+';font-size:12px;font-weight:600">'+l+'</span></div><div style="font-size:12px;color:#666;margin-top:3px">'+d.divergence.signal+'</div></div>');
