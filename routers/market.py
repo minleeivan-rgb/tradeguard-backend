@@ -100,22 +100,18 @@ async def get_tw_market():
     except Exception as e:
         print(f"[market] futures: {e}")
 
-    # 漲跌家數 from TWSE（重新抓，不用 cache）
+    # 漲跌家數 - 用 fetch_twse_stock_performance()
     breadth = None
     try:
-        url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?response=json"
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = r.json()
-        if data.get("stat") == "OK":
-            items = data.get("data", [])
-            up   = sum(1 for x in items if _safe_float(x[3]) > _safe_float(x[2]))
-            down = sum(1 for x in items if _safe_float(x[3]) < _safe_float(x[2]))
-            flat = len(items) - up - down
+        from services.twse import fetch_twse_stock_performance
+        perf = await fetch_twse_stock_performance()
+        if perf:
+            up   = sum(1 for v in perf.values() if v["change_pct"] > 0)
+            down = sum(1 for v in perf.values() if v["change_pct"] < 0)
+            flat = len(perf) - up - down
+            limit_up   = sum(1 for v in perf.values() if v.get("to_limit_pct") is not None and v.get("to_limit_pct") <= 0.1)
+            limit_down = sum(1 for v in perf.values() if v["change_pct"] <= -9.5)
             ratio = round(up / down, 2) if down > 0 else 99
-            # 計算漲停跌停（漲幅 >= 9.9%）
-            limit_up   = sum(1 for x in items if _safe_pct(x) >= 9.9)
-            limit_down = sum(1 for x in items if _safe_pct(x) <= -9.9)
             breadth = {
                 "up": up, "down": down, "flat": flat,
                 "limit_up": limit_up, "limit_down": limit_down,
@@ -197,72 +193,30 @@ async def get_institutional():
 
 @router.get("/margin-trend")
 async def get_margin_trend():
-    """融資餘額近期趨勢（TWSE MI_MARGN）"""
+    """融資餘額近期趨勢（FinMind）"""
     try:
-        url = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?response=json&selectType=MS"
-        async with httpx.AsyncClient(timeout=15, verify=False) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = r.json()
-        rows = data.get("data", [])
-        if not rows:
-            return {"error": "無資料"}
-
-        history = []
-        for i, row in enumerate(rows[-20:]):
-            bal = _safe_float(row[1]) if len(row) > 1 else 0
-            prev_bal = _safe_float(rows[max(0,i-1)][1]) if i > 0 else bal
-            chg = round((bal - prev_bal) / prev_bal * 100, 2) if prev_bal else 0
-            history.append({
-                "date":       str(row[0]) if row else "",
-                "balance":    round(bal / 1e8, 2),
-                "change_pct": chg,
-            })
-
-        latest = history[-1]
-        return {
-            "balance":    latest["balance"],
-            "change_pct": latest["change_pct"],
-            "trend":      "增加" if latest["change_pct"] > 0 else "減少",
-            "history":    history,
-        }
+        from services.finmind import get_tw_margin_trend
+        result = await get_tw_margin_trend()
+        if result:
+            return result
+        return {"error": "FinMind 暫無資料"}
     except Exception as e:
         print(f"[market] margin-trend: {e}")
         return {"error": str(e)}
 
 @router.get("/sectors")
 async def get_sector_strength():
-    """族群強弱（直接從 TWSE 抓，不用 cache）"""
+    """族群強弱 - 用 twse.py 已有的 fetch_twse_stock_performance()"""
     try:
+        from services.twse import fetch_twse_stock_performance, _twse_cache
         from routers.scan import TW_THEME_SECTORS, TW_STOCK_LIST, _calc_score
-        url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?response=json"
-        async with httpx.AsyncClient(timeout=20, verify=False) as client:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = r.json()
-        if data.get("stat") != "OK":
-            return {"error": "TWSE 無資料", "sectors": []}
 
-        fields = data.get("fields", [])
-        close_idx  = next((i for i, f in enumerate(fields) if "收盤" in str(f)), None)
-        change_idx = next((i for i, f in enumerate(fields) if "漲跌" in str(f)), None)
-        vol_idx    = next((i for i, f in enumerate(fields) if "成交股數" in str(f)), None)
+        # 強制清除 performance cache 確保拿到最新資料
+        _twse_cache["performance"] = {}
 
-        perf = {}
-        for item in data.get("data", []):
-            try:
-                code = str(item[0]).strip()
-                if not (code.isdigit() and 4 <= len(code) <= 5):
-                    continue
-                close = _safe_float(item[close_idx]) if close_idx is not None else 0
-                chg   = _safe_float(item[change_idx]) if change_idx is not None else 0
-                vol   = _safe_float(item[vol_idx]) if vol_idx is not None else 0
-                prev  = close - chg
-                chg_pct = round(chg / prev * 100, 2) if prev > 0 else 0
-                perf[code] = {"current_price": close, "change_pct": chg_pct, "volume": vol}
-            except:
-                continue
-
+        perf = await fetch_twse_stock_performance()
         if not perf:
-            return {"error": "TWSE 資料解析失敗", "sectors": []}
+            return {"error": "TWSE 今日無資料（收盤後或假日）", "sectors": []}
 
         results = []
         for sector_name, tickers in TW_THEME_SECTORS.items():
@@ -275,7 +229,8 @@ async def get_sector_strength():
                 tvol += vol
                 stocks.append({"ticker": code, "name": TW_STOCK_LIST.get(code, code),
                                "current_price": p["current_price"], "change_pct": p["change_pct"],
-                               "volume": vol, "to_limit_pct": None, "is_hot": p["change_pct"] >= 7})
+                               "volume": vol, "to_limit_pct": p.get("to_limit_pct"),
+                               "is_hot": p["change_pct"] >= 7})
             if len(stocks) >= 2:
                 results.append(_calc_score(sector_name, stocks, tvol))
         results.sort(key=lambda x: x["strength_score"], reverse=True)
