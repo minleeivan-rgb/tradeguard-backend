@@ -638,7 +638,7 @@ let API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:8000' 
   : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
-const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye'];
+const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market'];
 
 // ==================== 規則常數 ====================
 const CAT_CONFIG = {
@@ -749,6 +749,7 @@ function go(t) {
   if(t === 'review') { loadSellOptions(); loadReviewRules(); }
   if(t === 'settings') loadCustomRules();
   if(t === 'gooaye') loadGooayeHistory();
+  if(t === 'market') loadMarketRadar();
 }
 
 // ==================== 自訂規則 ====================
