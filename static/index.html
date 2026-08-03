@@ -216,6 +216,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <button class="tab" onclick="go('gooaye')">股癌雷達</button>
       <button class="tab" onclick="go('market')">大盤雷達</button>
       <button class="tab" onclick="go('watchlist')">觀察清單</button>
+      <button class="tab" onclick="go('etf')">主動ETF</button>
     </div>
   </div>
 
@@ -485,6 +486,28 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
 
     </div>
 
+    <!-- ACTIVE ETF -->
+    <div id="etf" class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">主動式ETF動向</div>
+          <div id="etfDate" style="font-size:12px;color:#aaa;margin-top:2px">全台主動式ETF每日申報持股</div>
+        </div>
+        <button onclick="loadEtf()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">刷新</button>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">全體主動ETF 今日集體動向</div>
+        <div id="etfOverview" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">點擊刷新載入</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title">單一ETF明細</div>
+          <select id="etfSelect" onchange="loadEtfDetail()" style="padding:7px 10px;border:1px solid #e5e5e0;border-radius:10px;font-size:13px;max-width:230px"><option value="">選擇ETF...</option></select>
+        </div>
+        <div id="etfDetail" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">選擇一檔主動式ETF</div></div>
+      </div>
+    </div>
+
     <!-- WATCHLIST -->
     <div id="watchlist" class="section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -679,7 +702,7 @@ let API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:8000' 
   : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
-const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist'];
+const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist','etf'];
 
 // ==================== 規則常數 ====================
 const CAT_CONFIG = {
@@ -792,6 +815,7 @@ function go(t) {
   if(t === 'gooaye') loadGooayeHistory();
   if(t === 'market') loadMarketRadar();
   if(t === 'watchlist') loadWatchlist();
+  if(t === 'etf') loadEtf();
 }
 
 // ==================== 自訂規則 ====================
@@ -2313,6 +2337,86 @@ async function loadMarketRadar(){
   if(e.status==='fulfilled')_mrmh(e.value.holdings||[]);
   if(f.status==='fulfilled')_mrinst(f.value);
   if(g.status==='fulfilled')_mrmargintrend(g.value);
+}
+
+
+// ==================== 主動式ETF ====================
+var _etfListLoaded=false;
+
+async function loadEtf(){
+  if(typeof USER_ID==='undefined'||!USER_ID){alert('請先登入');return;}
+  var ov=document.getElementById('etfOverview');
+  ov.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  if(!_etfListLoaded){
+    try{
+      var l=await fetch(API_BASE+'/etf/list').then(r=>r.json());
+      var sel=document.getElementById('etfSelect');
+      (l.items||[]).forEach(function(x){
+        var o=document.createElement('option');o.value=x.stock_id;o.textContent=x.stock_id+' '+x.name;sel.appendChild(o);
+      });
+      if((l.items||[]).length)_etfListLoaded=true;
+    }catch(e){}
+  }
+  try{
+    var r=await fetch(API_BASE+'/etf/overview').then(x=>x.json());
+    if(r.error){
+      ov.innerHTML='<div style="color:'+(r.tier_required?'#c97c0a':'#d63b3b')+';font-size:13px;padding:10px;line-height:1.7">'+r.error+'</div>';
+      return;
+    }
+    document.getElementById('etfDate').textContent='資料日期：'+r.date+'（'+r.etf_count+' 檔主動式ETF）· '+(r.note||'');
+    function col(title,items,color){
+      if(!items||!items.length)return'<div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:6px">'+title+'</div><div style="color:#aaa;font-size:12px">無</div></div>';
+      return'<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:'+color+';margin-bottom:6px">'+title+'</div>'+
+        items.slice(0,10).map(function(x){
+          var v=x.est_value_yi!==null&&x.est_value_yi!==undefined?Math.abs(x.est_value_yi)+'億':Math.abs(x.net_lots)+'張';
+          var cnt=x.net_lots>0?x.buy_etf_count:x.sell_etf_count;
+          return'<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f8f8f5">'+
+            '<div style="min-width:0"><span style="font-weight:600;font-size:13px">'+x.ticker+' '+x.name+'</span>'+
+            '<span style="font-size:11px;color:#aaa;margin-left:5px">'+cnt+'檔ETF</span></div>'+
+            '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0"><span style="color:'+color+';font-weight:600;font-size:13px">'+v+'</span>'+
+            '<button onclick="addWatch(\''+x.ticker+'\',\'tw\')" style="padding:2px 8px;background:#fff;border:1px solid #cfe5db;color:#1a7a52;border-radius:8px;font-size:10px;cursor:pointer">加觀察</button></div></div>';
+        }).join('')+'</div>';
+    }
+    ov.innerHTML='<div style="display:flex;gap:16px;flex-wrap:wrap">'+
+      col('集體淨買超 Top',r.top_buys,'#1a7a52')+col('集體淨賣超 Top',r.top_sells,'#d63b3b')+'</div>';
+  }catch(e){ov.innerHTML='<div style="color:#d63b3b;padding:12px">失敗 '+e+'</div>';}
+}
+
+async function loadEtfDetail(){
+  var id=document.getElementById('etfSelect').value;
+  var el=document.getElementById('etfDetail');
+  if(!id){el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">選擇一檔主動式ETF</div>';return;}
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/etf/'+id+'/detail').then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:'+(r.tier_required?'#c97c0a':'#d63b3b')+';font-size:13px;padding:10px;line-height:1.7">'+r.error+'</div>';return;}
+    var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:8px">資料日期：'+r.date+(r.prev_date?'（權重變化 vs '+r.prev_date+'）':'')+' · '+(r.note||'')+'</div>';
+    function chips(title,items,color,sign){
+      if(!items||!items.length)return'';
+      return'<div style="margin-bottom:8px"><span style="font-size:12px;font-weight:600;color:'+color+'">'+title+'：</span>'+
+        items.map(function(x){return'<span style="font-size:11px;background:'+color+'14;color:'+color+';padding:2px 8px;border-radius:6px;margin-right:5px;display:inline-block;margin-bottom:4px">'+x.ticker+' '+x.name+' '+sign+Math.abs(x.weight_delta)+'%</span>';}).join('')+'</div>';
+    }
+    html+=chips('主動加碼（權重↑）',r.active_adds,'#1a7a52','+');
+    html+=chips('主動減碼（權重↓）',r.active_cuts,'#d63b3b','-');
+    if(r.changes&&r.changes.length){
+      html+='<div style="font-size:12px;font-weight:600;margin:10px 0 4px">今日持股異動（張）</div>'+
+        r.changes.slice(0,10).map(function(x){
+          var col=x.net_lots>=0?'#1a7a52':'#d63b3b';
+          return'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f8f8f5;font-size:12px">'+
+            '<span>'+x.ticker+' '+x.name+'</span><span style="color:'+col+';font-weight:600">'+(x.net_lots>0?'+':'')+x.net_lots+'張</span></div>';
+        }).join('');
+    }
+    html+='<div style="font-size:12px;font-weight:600;margin:12px 0 4px">持股明細 Top 15</div>'+
+      (r.holdings||[]).slice(0,15).map(function(x){
+        var wd=x.weight_delta;
+        var badge=wd===null||wd===undefined?'':'<span style="font-size:10px;color:'+(wd>=0?'#1a7a52':'#d63b3b')+';margin-left:6px">'+(wd>0?'+':'')+wd+'%</span>';
+        return'<div style="padding:5px 0;border-bottom:1px solid #f8f8f5">'+
+          '<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:600">'+x.ticker+' '+x.name+badge+'</span><span style="font-weight:600">'+x.weight+'%</span></div>'+
+          '<div style="height:4px;background:#f0f0ec;border-radius:2px;margin-top:3px"><div style="height:4px;width:'+Math.min(x.weight*4,100)+'%;background:#1a7a52;border-radius:2px"></div></div>'+
+          '<div style="font-size:10px;color:#aaa;margin-top:2px">'+x.shares_lots+'張 · 市值'+x.market_value_yi+'億</div></div>';
+      }).join('');
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:12px">失敗 '+e+'</div>';}
 }
 
 </script>
