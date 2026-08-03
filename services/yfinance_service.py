@@ -25,6 +25,31 @@ def is_tw_trading_hours() -> bool:
 async def get_tw_realtime_price(ticker: str) -> dict | None:
     """即時價（多層備援）：TWSE MIS → Yahoo chart API
     回傳 {current_price, source, price_time}（price_time 為台北時間 MM/DD HH:MM）"""
+    # 0) FinMind Sponsor 即時 snapshot（最準，含量比）
+    try:
+        import os as _os
+        _tok = _os.getenv("FINMIND_TOKEN", "")
+        if _tok:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r0 = await client.get("https://api.finmindtrade.com/api/v4/data",
+                    params={"dataset": "taiwan_stock_tick_snapshot",
+                            "data_id": ticker, "token": _tok})
+            j0 = r0.json()
+            if j0.get("status") == 200 and j0.get("data"):
+                it = j0["data"][-1]
+                px = float(it.get("close", 0) or 0)
+                if px > 0:
+                    dt = str(it.get("date", ""))
+                    ptime = dt[5:16].replace("-", "/") if len(dt) >= 16 else dt[5:10].replace("-", "/")
+                    out = {"current_price": round(px, 2), "source": "FinMind即時",
+                           "price_time": ptime}
+                    vr = it.get("volume_ratio")
+                    if vr:
+                        out["volume_ratio"] = round(float(vr), 2)
+                    return out
+    except Exception:
+        pass
+
     # 1) TWSE MIS（FIX: 必須帶 Referer；z 可能為 '-' 需安全轉型）
     mis_headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
