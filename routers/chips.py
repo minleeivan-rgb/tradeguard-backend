@@ -25,6 +25,13 @@ FOREIGN_KW = ["美林", "摩根", "高盛", "瑞銀", "花旗", "港商", "新�
 def _is_foreign(name: str) -> bool:
     return any(k in name for k in FOREIGN_KW)
 
+def _parse(j, label: str) -> list:
+    """容錯：有 data list 就收，錯誤時吐完整回應內容"""
+    if isinstance(j, dict) and isinstance(j.get("data"), list):
+        if j.get("status", 200) == 200 or j["data"]:
+            return j["data"]
+    raise Exception(f"{label} 回應: {str(j)[:260]}")
+
 async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) -> list:
     params = {"dataset": dataset, "start_date": start, "token": FINMIND_TOKEN}
     if end:
@@ -32,12 +39,12 @@ async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) ->
     if data_id:
         params["data_id"] = data_id
     async with httpx.AsyncClient(timeout=40) as c:
-        r = await c.get(FM_DATA, params=params,
-                        headers={"Authorization": f"Bearer {FINMIND_TOKEN}"})
-    j = r.json()
-    if j.get("status") != 200:
-        raise Exception(f"{dataset}: {j.get('msg', 'unknown')}")
-    return j.get("data", [])
+        r = await c.get(FM_DATA, params=params)
+    try:
+        j = r.json()
+    except Exception:
+        raise Exception(f"{dataset} HTTP {r.status_code}: {r.text[:200]}")
+    return _parse(j, dataset)
 
 @router.get("/branch/{ticker}")
 async def branch_chips(ticker: str, days: int = 5):
@@ -50,10 +57,14 @@ async def branch_chips(ticker: str, days: int = 5):
         async with httpx.AsyncClient(timeout=40) as c:
             r = await c.get(FM_SECAGG, params=params,
                             headers={"Authorization": f"Bearer {FINMIND_TOKEN}"})
-        j = r.json()
-        if j.get("status") != 200:
-            return {"error": f"分點資料: {j.get('msg', 'unknown')}"}
-        rows = j.get("data", [])
+        try:
+            j = r.json()
+        except Exception:
+            return {"error": f"分點 HTTP {r.status_code}: {r.text[:200]}"}
+        try:
+            rows = _parse(j, "分點SecIdAgg")
+        except Exception as pe:
+            return {"error": str(pe)}
         if not rows:
             return {"error": "近期無分點資料"}
 
@@ -229,3 +240,60 @@ async def moneyflow():
                 "note": "pct=占全市場個股成交金額比重；delta=較前一交易日增減"}
     except Exception as e:
         return {"error": str(e)}
+
+@router.get("/debug")
+async def chips_debug():
+    """逐一測 Sponsor 資料源，回傳真實回應形狀"""
+    out = {}
+    now = datetime.now(TW_TZ)
+
+    async def _raw(url, params, use_bearer=False):
+        headers = {"Authorization": f"Bearer {FINMIND_TOKEN}"} if use_bearer else {}
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.get(url, params=params, headers=headers)
+        try:
+            j = r.json()
+        except Exception:
+            return {"http": r.status_code, "body": r.text[:200]}
+        info = {"http": r.status_code, "keys": list(j.keys())[:8] if isinstance(j, dict) else type(j).__name__,
+                "status_field": j.get("status") if isinstance(j, dict) else None,
+                "msg": j.get("msg") if isinstance(j, dict) else None}
+        data = j.get("data") if isinstance(j, dict) else None
+        if isinstance(data, list):
+            info["rows"] = len(data)
+            if data:
+                info["sample_keys"] = list(data[0].keys())[:12]
+        else:
+            info["body_snippet"] = str(j)[:200]
+        return info
+
+    start5 = (now - timedelta(days=9)).strftime("%Y-%m-%d")
+    end0   = now.strftime("%Y-%m-%d")
+
+    out["secagg_bearer"] = await _raw(FM_SECAGG,
+        {"data_id": "2330", "start_date": start5, "end_date": end0, "token": FINMIND_TOKEN}, True)
+    out["secagg_token_only"] = await _raw(FM_SECAGG,
+        {"data_id": "2330", "start_date": start5, "end_date": end0, "token": FINMIND_TOKEN}, False)
+    out["daily_report_endpoint"] = await _raw(
+        "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report",
+        {"data_id": "2330", "date": _last_weekday_str(), "token": FINMIND_TOKEN}, False)
+    out["govbank"] = await _raw(FM_DATA,
+        {"dataset": "TaiwanstockGovernmentBankBuySell",
+         "start_date": (now - timedelta(days=16)).strftime("%Y-%m-%d"), "token": FINMIND_TOKEN})
+    out["moneyflow"] = await _raw(FM_DATA,
+        {"dataset": "TaiwanStockIndustryChainMoneyFlow",
+         "start_date": _last_weekday_str(), "token": FINMIND_TOKEN})
+    out["snapshot_2330"] = await _raw(FM_DATA,
+        {"dataset": "taiwan_stock_tick_snapshot", "data_id": "2330", "token": FINMIND_TOKEN})
+    out["snapshot_001"] = await _raw(FM_DATA,
+        {"dataset": "taiwan_stock_tick_snapshot", "data_id": "001", "token": FINMIND_TOKEN})
+    out["kbar_2330"] = await _raw(FM_DATA,
+        {"dataset": "TaiwanStockKBar", "data_id": "2330",
+         "start_date": _last_weekday_str(), "token": FINMIND_TOKEN})
+    return out
+
+def _last_weekday_str() -> str:
+    d = datetime.now(TW_TZ)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
