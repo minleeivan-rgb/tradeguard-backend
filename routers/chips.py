@@ -369,3 +369,51 @@ def _last_weekday_str() -> str:
     while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d.strftime("%Y-%m-%d")
+
+@router.get("/verify/{ticker}")
+async def branch_verify(ticker: str, date: str = ""):
+    """對帳端點：不做任何換算，直接檢驗 Σ分點買 = Σ分點賣 = 官方成交量
+    buy_over_volume ≈ 1.0  → 資料完整且單位為股
+    buy_over_volume ≈ 0.001 → 單位其實是張（顯示層要修）
+    buy_over_volume 明顯 < 0.9 → 該日資料尚未爬完整
+    """
+    try:
+        if not date:
+            date = _last_weekday_str()
+        url = "https://api.finmindtrade.com/api/v4/taiwan_stock_trading_daily_report"
+        async with httpx.AsyncClient(timeout=40) as cli:
+            r = await cli.get(url, params={"data_id": ticker, "date": date,
+                                           "token": FINMIND_TOKEN})
+        try:
+            rows = _parse(r.json(), f"分點 {date}")
+        except Exception as pe:
+            return {"error": str(pe), "date": date}
+
+        sum_buy  = sum(float(x.get("buy", 0) or 0) for x in rows)
+        sum_sell = sum(float(x.get("sell", 0) or 0) for x in rows)
+        branches = {str(x.get("securities_trader_id", "")) or x.get("securities_trader", "")
+                    for x in rows}
+
+        vol, close = None, None
+        try:
+            vrows = await _fm("TaiwanStockPrice", date, date, ticker)
+            if vrows:
+                vol   = float(vrows[-1].get("Trading_Volume", 0) or 0)
+                close = float(vrows[-1].get("close", 0) or 0)
+        except Exception:
+            pass
+
+        return {
+            "ticker": ticker, "date": date,
+            "row_count": len(rows), "branch_count": len(branches),
+            "sum_buy_raw": int(sum_buy), "sum_sell_raw": int(sum_sell),
+            "official_volume_shares": int(vol) if vol else None,
+            "official_close": close,
+            "buy_over_volume":  round(sum_buy / vol, 4) if vol else None,
+            "sell_over_volume": round(sum_sell / vol, 4) if vol else None,
+            "buy_sell_diff_pct": round((sum_buy - sum_sell) / sum_buy * 100, 2) if sum_buy else None,
+            "sample_rows": rows[:5],
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
