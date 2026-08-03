@@ -403,6 +403,248 @@ async def get_holdings_divergence(user_id: str):
                         "direction": tech.get("direction", "中性"), "divergence": div})
     return {"stocks": results}
 
+
+# ── 反轉儀表板資料源（FinMind 已查證資料集）─────────────────────
+
+async def _fm_q(dataset: str, days: int = 14, data_id: str = None) -> list:
+    start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end   = datetime.now().strftime("%Y-%m-%d")
+    params = {"dataset": dataset, "start_date": start, "end_date": end, "token": FINMIND_TOKEN}
+    if data_id:
+        params["data_id"] = data_id
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(FINMIND_BASE, params=params)
+    j = r.json()
+    if j.get("status") != 200:
+        raise Exception(f"FinMind {dataset}: {j.get('msg', 'unknown')}")
+    return j.get("data", [])
+
+async def _futures_oi_data() -> dict:
+    """外資台指期淨未平倉 + 散戶小台淨部位（= -三大法人小台淨OI）"""
+    rows = await _fm_q("TaiwanFuturesInstitutionalInvestors", days=16, data_id="TX")
+    by_date = {}
+    for r in rows:
+        inst = str(r.get("institutional_investors", "")).lower()
+        if "foreign" in inst and "dealer" not in inst:
+            net = float(r.get("long_open_interest_balance_volume", 0) or 0)                 - float(r.get("short_open_interest_balance_volume", 0) or 0)
+            by_date[r["date"]] = net
+    dates = sorted(by_date)
+    if not dates:
+        raise Exception("TX 外資 OI 無資料")
+    latest = by_date[dates[-1]]
+    prev5  = by_date[dates[-6]] if len(dates) >= 6 else by_date[dates[0]]
+    # 小台散戶 = -(三大法人淨OI)
+    retail = None
+    try:
+        mrows = await _fm_q("TaiwanFuturesInstitutionalInvestors", days=6, data_id="MTX")
+        md = {}
+        for r in mrows:
+            net = float(r.get("long_open_interest_balance_volume", 0) or 0)                 - float(r.get("short_open_interest_balance_volume", 0) or 0)
+            md[r["date"]] = md.get(r["date"], 0) + net
+        if md:
+            retail = -md[sorted(md)[-1]]
+    except Exception:
+        pass
+    return {"date": dates[-1], "foreign_net_oi": int(latest),
+            "chg5": int(latest - prev5),
+            "trend": "偏多" if latest > 0 else "偏空",
+            "warn": bool(latest < 0 and (latest - prev5) < -3000),
+            "retail_mtx_net": int(retail) if retail is not None else None}
+
+async def _internals_data() -> dict:
+    out = {}
+    try:
+        from services.signals import pct_above_ma20, adl_status
+        out["above_ma20"] = await pct_above_ma20()
+        out["adl"] = await adl_status()
+    except Exception as e:
+        out["internals_error"] = str(e)
+    try:
+        rows = await _fm_q("TaiwanOptionVix", days=10)
+        if rows:
+            last = sorted(rows, key=lambda x: (x["date"], x.get("time", "")))[-1]
+            out["twvix"] = {"value": round(float(last["vix"]), 2), "date": last["date"]}
+    except Exception as e:
+        out["twvix"] = {"error": str(e)}
+    try:
+        rows = await _fm_q("CnnFearGreedIndex", days=10)
+        if rows:
+            last = sorted(rows, key=lambda x: x["date"])[-1]
+            out["fear_greed"] = {"value": round(float(last["fear_greed"]), 0),
+                                 "emotion": last.get("fear_greed_emotion", ""), "date": last["date"]}
+    except Exception as e:
+        out["fear_greed"] = {"error": str(e)}
+    try:
+        rows = await _fm_q("TaiwanTotalExchangeMarginMaintenance", days=20)
+        if rows:
+            last = sorted(rows, key=lambda x: x["date"])[-1]
+            out["maintenance"] = {"value": round(float(last["TotalExchangeMarginMaintenance"]), 1),
+                                  "date": last["date"]}
+    except Exception as e:
+        out["maintenance"] = {"error": str(e)}
+    try:
+        y10 = await _fm_q("GovernmentBondsYield", days=14, data_id="United States 10-Year")
+        y3m = await _fm_q("GovernmentBondsYield", days=14, data_id="United States 3-Month")
+        if y10 and y3m:
+            v10 = float(sorted(y10, key=lambda x: x["date"])[-1]["value"])
+            v3  = float(sorted(y3m, key=lambda x: x["date"])[-1]["value"])
+            sp = round(v10 - v3, 2)
+            out["yield_spread"] = {"us10y": v10, "us3m": v3, "spread": sp,
+                                   "inverted": sp < 0}
+    except Exception as e:
+        out["yield_spread"] = {"error": str(e)}
+    return out
+
+async def compute_market_signal() -> dict:
+    """市場燈號 0-100：融資操作者的每日曝險決策"""
+    comps = []
+    async def _safe(coro):
+        try:
+            return await coro
+        except Exception:
+            return None
+
+    twii_t = asyncio.to_thread(_yf_data, "^TWII")
+    vix_t  = asyncio.to_thread(_yf_data, "^VIX")
+    twii, vix, perf, inst, foi, mt, internals = await asyncio.gather(
+        twii_t, vix_t, _safe(_get_perf()), _safe(get_institutional()),
+        _safe(_futures_oi_data()), _safe(_margin_trend_data()), _safe(_internals_data()))
+
+    # 1 趨勢 25
+    s = 50; d = "資料不足"
+    if twii:
+        closes = twii["closes"]
+        ma20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else None
+        ma60 = sum(closes[-60:]) / 60 if len(closes) >= 60 else ma20
+        cur = closes[-1]
+        if ma20 and ma60:
+            if cur > ma20 and cur > ma60 and ma20 > ma60:
+                s, d = 95, f"指數站上月線與季線且多頭排列（{cur:,.0f}）"
+            elif cur > ma20 and cur > ma60:
+                s, d = 75, "指數站上月線與季線"
+            elif cur > ma60:
+                s, d = 45, "跌破月線但守住季線"
+            else:
+                s, d = 15, "跌破月線與季線，空方結構"
+    comps.append({"name": "指數趨勢", "weight": 25, "score": s, "detail": d})
+
+    # 2 市場廣度 15
+    s = 50; d = "無資料"
+    if perf:
+        up = sum(1 for v in perf.values() if v["change_pct"] > 0)
+        down = sum(1 for v in perf.values() if v["change_pct"] < 0)
+        ratio = round(up / down, 2) if down else 9.9
+        am = (internals or {}).get("above_ma20", {}) if internals else {}
+        pct = am.get("pct")
+        base = 90 if ratio >= 2 else 70 if ratio >= 1.2 else 50 if ratio >= 0.8 else 30 if ratio >= 0.5 else 10
+        if pct is not None:
+            pb = 20 if pct < 20 else 85 if 20 <= pct <= 75 else 35
+            s = round((base + pb) / 2)
+            d = f"漲跌比 {ratio}，{pct}% 個股站上月線"
+        else:
+            s, d = base, f"漲跌比 {ratio}"
+    comps.append({"name": "市場廣度", "weight": 15, "score": s, "detail": d})
+
+    # 3 VIX 10
+    s = 60; d = "無資料"
+    if vix:
+        v = vix["current"]
+        s = 90 if v < 16 else 70 if v < 20 else 40 if v < 25 else 20 if v < 30 else 5
+        d = f"VIX {v}"
+    comps.append({"name": "恐慌指標", "weight": 10, "score": s, "detail": d})
+
+    # 4 外資現貨 10
+    s = 50; d = "無資料"
+    if inst and inst.get("foreign_net") is not None:
+        f = inst["foreign_net"]
+        s = 85 if f > 0 else 25
+        d = f"外資現貨{inst.get('foreign_trend','')} {round(abs(f)/1e8,1)}億"
+    comps.append({"name": "外資現貨", "weight": 10, "score": s, "detail": d})
+
+    # 5 外資期貨OI 15
+    s = 50; d = "無資料"
+    if foi:
+        fo, ch = foi["foreign_net_oi"], foi["chg5"]
+        if fo > 0 and ch >= 0:
+            s, d = 90, f"外資期貨淨多 {fo:,} 口且增加"
+        elif fo > 0:
+            s, d = 65, f"外資期貨淨多 {fo:,} 口但5日減 {abs(ch):,}"
+        elif ch < -3000:
+            s, d = 10, f"外資期貨淨空 {abs(fo):,} 口且5日大增空單（反轉警訊）"
+        else:
+            s, d = 30, f"外資期貨淨空 {abs(fo):,} 口"
+    comps.append({"name": "外資期貨籌碼", "weight": 15, "score": s, "detail": d})
+
+    # 6 融資動能 10
+    s = 60; d = "無資料"
+    if mt and mt.get("history"):
+        h = mt["history"]
+        g5 = round(sum(x["change_pct"] for x in h[-5:]), 2)
+        idx5 = 0
+        if twii and len(twii["closes"]) >= 6:
+            idx5 = round((twii["closes"][-1] / twii["closes"][-6] - 1) * 100, 2)
+        if g5 > 3 and idx5 < 1:
+            s, d = 10, f"融資5日暴增 {g5}% 但指數僅 {idx5}%（散戶過熱警訊）"
+        elif g5 > 1.5:
+            s, d = 45, f"融資5日增 {g5}%"
+        elif g5 < -1:
+            s, d = 85, f"融資5日減 {abs(g5)}%（籌碼沉澱）"
+        else:
+            s, d = 70, f"融資5日 {g5:+}% 平穩"
+    comps.append({"name": "融資動能", "weight": 10, "score": s, "detail": d})
+
+    # 7 大盤維持率 10
+    s = 60; d = "無資料"
+    mv = (internals or {}).get("maintenance", {}) if internals else {}
+    if mv.get("value"):
+        v = mv["value"]
+        s = 85 if v >= 170 else 65 if v >= 160 else 45 if v >= 150 else 25 if v >= 140 else 5
+        d = f"大盤融資維持率 {v}%"
+    comps.append({"name": "融資維持率", "weight": 10, "score": s, "detail": d})
+
+    # 8 背離 5
+    s = 75; d = "無明顯背離"
+    if twii:
+        div = _divergence(twii["closes"], twii["rsi"], twii["kd"]["k"], "台股")
+        if div["type"] == "bearish":
+            s, d = 25, "加權指數頂背離"
+        elif div["type"] == "bullish":
+            s, d = 90, "加權指數底背離（反彈訊號）"
+    adl = (internals or {}).get("adl", {}) if internals else {}
+    if adl.get("divergence"):
+        s = min(s, 20)
+        d += "；ADL 頂背離"
+    comps.append({"name": "背離偵測", "weight": 5, "score": s, "detail": d})
+
+    total = round(sum(c["score"] * c["weight"] for c in comps) / sum(c["weight"] for c in comps))
+    if total >= 70:
+        light, advice = "green", "多頭環境：可維持既有槓桿，照移動停利規則操作，新倉分批"
+    elif total >= 45:
+        light, advice = "yellow", "震盪轉弱：停利點上移、暫停加碼融資部位，維持率目標 >180%"
+    else:
+        light, advice = "red", "空方環境：降槓桿優先，減碼至維持率 >200%，等燈號回黃再進場"
+    return {"score": total, "light": light, "advice": advice, "components": comps,
+            "extras": {"futures_oi": foi, "internals": internals},
+            "updated_at": datetime.utcnow().isoformat()}
+
+@router.get("/futures-oi")
+async def futures_oi():
+    try:
+        return await _futures_oi_data()
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/internals")
+async def internals():
+    return await _internals_data()
+
+@router.get("/signal")
+async def market_signal():
+    try:
+        return await compute_market_signal()
+    except Exception as e:
+        return {"error": str(e)}
+
 @router.get("/debug")
 async def market_debug():
     out = {"finmind_token_set": bool(FINMIND_TOKEN)}
@@ -443,5 +685,24 @@ async def market_debug():
         out["finmind_margin"] = {"ok": True, "rows": len(rows)}
     except Exception as e:
         out["finmind_margin"] = {"ok": False, "error": str(e)}
+
+    for key, coro in [("futures_oi", _futures_oi_data())]:
+        try:
+            r = await coro
+            out[key] = {"ok": True, "sample": r}
+        except Exception as e:
+            out[key] = {"ok": False, "error": str(e)}
+    for key, ds in [("twvix", "TaiwanOptionVix"), ("fear_greed", "CnnFearGreedIndex"),
+                    ("maintenance", "TaiwanTotalExchangeMarginMaintenance")]:
+        try:
+            rows = await _fm_q(ds, days=10)
+            out[key] = {"ok": bool(rows), "rows": len(rows)}
+        except Exception as e:
+            out[key] = {"ok": False, "error": str(e)}
+    try:
+        from services.snapshot import db_status
+        out["snapshot_db"] = await db_status()
+    except Exception as e:
+        out["snapshot_db"] = {"error": str(e)}
 
     return out
