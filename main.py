@@ -43,6 +43,7 @@ from routers.watchlist   import router as watchlist_router
 from routers.signals     import router as signals_router
 from routers.etf         import router as etf_router
 from routers.chips       import router as chips_router
+from routers.audit       import router as audit_router
 
 app.include_router(holdings_router)
 app.include_router(scan_router)
@@ -57,6 +58,7 @@ app.include_router(watchlist_router)
 app.include_router(signals_router)
 app.include_router(etf_router)
 app.include_router(chips_router)
+app.include_router(audit_router)
 
 @app.get("/")
 async def root():
