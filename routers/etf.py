@@ -294,3 +294,57 @@ async def etf_detail(etf_id: str):
         return {"error": str(e), "tier_required": "Sponsor"}
     except Exception as e:
         return {"error": str(e)}
+
+# ── 官方來源探測（繞過 FinMind 延遲）────────────────────────────
+
+TWSE_CANDIDATES = [
+    ("openapi_pcf",      "https://openapi.twse.com.tw/v1/ETFReport/ETFPCF", {}),
+    ("openapi_etfrpt",   "https://openapi.twse.com.tw/v1/ETFReport/ETFReport", {}),
+    ("rwd_pcf_date",     "https://www.twse.com.tw/rwd/zh/ETF/etfPCF",
+                          {"response": "json", "date": "{ymd}"}),
+    ("rwd_pcf_nodate",   "https://www.twse.com.tw/rwd/zh/ETF/etfPCF", {"response": "json"}),
+    ("legacy_pcf",       "https://www.twse.com.tw/exchangeReport/ETFPCF",
+                          {"response": "json", "date": "{ymd}"}),
+    ("rwd_etf_daily",    "https://www.twse.com.tw/rwd/zh/ETF/etfDaily",
+                          {"response": "json", "date": "{ymd}"}),
+]
+
+@router.get("/probe-official")
+async def probe_official(date: str = ""):
+    """探測證交所官方 ETF 持股/PCF 端點，回報哪個可用（含真實回應片段）"""
+    d = (date or _last_trading_day(0)).replace("-", "")
+    out = {"probe_date_ymd": d, "results": {}}
+    headers = {"User-Agent": "Mozilla/5.0", "accept": "application/json",
+               "Referer": "https://www.twse.com.tw/"}
+    for name, url, params in TWSE_CANDIDATES:
+        pr = {k: v.replace("{ymd}", d) for k, v in params.items()}
+        try:
+            async with httpx.AsyncClient(timeout=25, verify=False) as cli:
+                r = await cli.get(url, params=pr, headers=headers)
+            info = {"http": r.status_code, "content_type": r.headers.get("content-type", "")[:60]}
+            try:
+                j = r.json()
+                if isinstance(j, list):
+                    info["shape"] = "list"
+                    info["rows"] = len(j)
+                    if j:
+                        info["sample_keys"] = list(j[0].keys())[:14]
+                        info["sample_row"] = {k: str(v)[:40] for k, v in list(j[0].items())[:8]}
+                elif isinstance(j, dict):
+                    info["shape"] = "dict"
+                    info["keys"] = list(j.keys())[:12]
+                    info["stat"] = j.get("stat")
+                    data = j.get("data") or j.get("aaData")
+                    if isinstance(data, list):
+                        info["rows"] = len(data)
+                        info["fields"] = (j.get("fields") or j.get("columns") or [])[:14]
+                        if data:
+                            info["sample_row"] = [str(x)[:30] for x in data[0][:8]] \
+                                if isinstance(data[0], list) else str(data[0])[:200]
+            except Exception:
+                info["not_json"] = r.text[:200]
+            out["results"][name] = info
+        except Exception as e:
+            out["results"][name] = {"error": str(e)[:180]}
+    return out
+
