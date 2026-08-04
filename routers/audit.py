@@ -35,14 +35,24 @@ async def _fm(dataset, start, end=None, data_id=None):
 
 # ── 三個獨立即時價來源（各自直連，不經過 app 的合併函數）──
 async def _px_snapshot(t):
-    async with httpx.AsyncClient(timeout=6) as c:
-        r = await c.get(FM, params={"dataset": "taiwan_stock_tick_snapshot",
-                                    "data_id": t, "token": FINMIND_TOKEN})
-    j = r.json()
-    if j.get("status") == 200 and j.get("data"):
-        it = j["data"][-1]
-        return {"price": float(it.get("close", 0) or 0), "time": str(it.get("date", ""))}
-    return None
+    """FinMind Sponsor 即時 snapshot（獨立端點，非 dataset 參數）"""
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            r = await c.get("https://api.finmindtrade.com/api/v4/taiwan_stock_tick_snapshot",
+                            params={"data_id": t, "token": FINMIND_TOKEN})
+        j = r.json()
+        d = j.get("data")
+        if isinstance(d, dict):
+            d = [d]
+        if d:
+            it = d[-1]
+            px = float(it.get("close", 0) or 0)
+            if px > 0:
+                return {"price": px, "time": str(it.get("date", "")),
+                        "volume_ratio": it.get("volume_ratio")}
+        return {"error": str(j)[:160]}
+    except Exception as e:
+        return {"error": str(e)[:160]}
 
 async def _px_mis(t):
     h = {"User-Agent": "Mozilla/5.0", "Referer": "https://mis.twse.com.tw/stock/index.jsp"}
@@ -83,13 +93,21 @@ async def _px_yahoo(t):
 async def price_triangulate(ticker: str):
     """個股即時價三來源對照——拿去跟你券商畫面同時比"""
     a, b, c = await asyncio.gather(_px_snapshot(ticker), _px_mis(ticker), _px_yahoo(ticker))
-    px = [x["price"] for x in (a, b, c) if x]
+    px = [x["price"] for x in (a, b, c) if x and x.get("price")]
     spread = round((max(px) - min(px)) / min(px) * 100, 3) if len(px) >= 2 and min(px) > 0 else None
+    live = [x["price"] for x in (a, b) if x and x.get("price")]
+    live_spread = round(abs(live[0] - live[1]) / min(live) * 100, 3) if len(live) == 2 else None
+    if live_spread is not None:
+        verdict = "PASS 即時源一致" if live_spread < 0.3 else "WARN 即時源不一致"
+    elif len(live) == 1:
+        verdict = "INFO 僅單一即時源可用"
+    else:
+        verdict = "FAIL 無即時源"
     return {"ticker": ticker,
-            "finmind_snapshot": a, "twse_mis": b, "yahoo": c,
-            "max_spread_pct": spread,
-            "verdict": "PASS 三來源一致" if spread is not None and spread < 0.5
-                       else ("WARN 價差略大（可能盤中跳動或延遲）" if spread is not None else "INFO 來源不足")}
+            "finmind_snapshot": a, "twse_mis": b, "yahoo_delayed": c,
+            "live_spread_pct": live_spread, "max_spread_pct_incl_yahoo": spread,
+            "verdict": verdict,
+            "note": "Yahoo 台股約延遲15-20分鐘，僅作備援，不納入即時一致性判定"}
 
 @router.get("/full")
 async def audit_full():
@@ -100,24 +118,37 @@ async def audit_full():
     # 1. 即時價三角驗證
     try:
         tri = await price_triangulate("2330")
-        add("即時報價（2330 三來源）", "PASS" if "PASS" in tri["verdict"] else "WARN",
-            f"最大價差 {tri['max_spread_pct']}%", tri)
+        vd = "PASS" if tri["verdict"].startswith("PASS") else ("FAIL" if tri["verdict"].startswith("FAIL") else "WARN")
+        add("即時報價（2330 即時源比對）", vd,
+            f"{tri['verdict']}；即時源價差 {tri['live_spread_pct']}%（Yahoo延遲不計）", tri)
     except Exception as e:
         add("即時報價", "FAIL", str(e))
 
     # 2. 加權指數收盤：yfinance vs FinMind 官方 5 秒指數最後一筆
     try:
         import yfinance as yf
-        d = _lastwd()
-        rows = await _fm("TaiwanVariousIndicators5Seconds", d)
-        fm_close = float(rows[-1]["TAIEX"]) if rows else None
+        fm_close, d = None, None
+        for off in range(0, 6):
+            dd = _lastwd(off)
+            try:
+                rows = await _fm("TaiwanVariousIndicators5Seconds", dd)
+            except Exception:
+                rows = []
+            if rows:
+                fm_close, d = float(rows[-1]["TAIEX"]), dd
+                break
         h = yf.Ticker("^TWII").history(period="7d")["Close"]
         yf_close = round(float(h.iloc[-1]), 2)
-        diff = round(abs(yf_close - fm_close) / fm_close * 100, 3) if fm_close else None
-        add("加權指數收盤（yfinance vs 官方）",
-            "PASS" if diff is not None and diff < 0.3 else "WARN",
-            f"官方 {fm_close} vs yfinance {yf_close}，差 {diff}%",
-            {"official": fm_close, "yfinance": yf_close, "date": d})
+        if fm_close is None:
+            add("加權指數（yfinance vs 官方五秒指數）", "INFO",
+                f"官方五秒指數近6日無資料（該資料集常僅盤中提供）；yfinance {yf_close}",
+                {"yfinance": yf_close})
+        else:
+            diff = round(abs(yf_close - fm_close) / fm_close * 100, 3)
+            add("加權指數（yfinance vs 官方五秒指數）",
+                "PASS" if diff < 0.3 else "WARN",
+                f"官方 {fm_close} vs yfinance {yf_close}，差 {diff}%",
+                {"official": fm_close, "yfinance": yf_close, "date": d})
     except Exception as e:
         add("加權指數收盤", "FAIL", str(e))
 
@@ -158,19 +189,50 @@ async def audit_full():
 
     # 5. 融資餘額內部恆等式：今日=昨日+買-賣-現償，且日鏈相接
     try:
-        rows = await _fm("TaiwanStockTotalMarginPurchaseShortSale", _lastwd(14), _lastwd())
-        m = sorted([r for r in rows if r.get("name") == "MarginPurchaseMoney"], key=lambda x: x["date"])[-5:]
+        raw = await _fm("TaiwanStockTotalMarginPurchaseShortSale", _lastwd(20), _lastwd())
+        mp = [r for r in raw if r.get("name") == "MarginPurchaseMoney"]
+        bydate = {}
+        for r in mp:
+            bydate.setdefault(r["date"], []).append(r)
+        dup_dates = {d: len(v) for d, v in bydate.items() if len(v) > 1}
+        KEYS = ("TodayBalance", "YesBalance", "buy", "sell", "Return")
+        merged = []
+        for d in sorted(bydate):
+            rs = bydate[d]
+            if len(rs) == 1:
+                merged.append({"date": d, **{k: float(rs[0].get(k, 0) or 0) for k in KEYS}})
+            else:
+                vals = {tuple(float(x.get(k, 0) or 0) for k in KEYS) for x in rs}
+                if len(vals) == 1:
+                    merged.append({"date": d, **{k: float(rs[0].get(k, 0) or 0) for k in KEYS}})
+                else:
+                    merged.append({"date": d, **{k: sum(float(x.get(k, 0) or 0) for x in rs) for k in KEYS}})
+        m = merged[-6:]
         errs = []
         for r in m:
-            lhs = float(r["TodayBalance"])
-            rhs = float(r["YesBalance"]) + float(r["buy"]) - float(r["sell"]) - float(r["Return"])
+            lhs = r["TodayBalance"]
+            rhs = r["YesBalance"] + r["buy"] - r["sell"] - r["Return"]
             if abs(lhs - rhs) > 1000:
-                errs.append({"date": r["date"], "diff": lhs - rhs})
-        chain_ok = all(abs(float(m[i]["YesBalance"]) - float(m[i-1]["TodayBalance"])) < 1000
-                       for i in range(1, len(m)))
-        add("融資餘額恆等式（今=昨+買-賣-償）", "PASS" if not errs and chain_ok else "FAIL",
-            f"5日檢查，公式誤差{len(errs)}筆，日鏈{'相接' if chain_ok else '斷裂'}",
-            {"latest_balance_yi": round(float(m[-1]['TodayBalance'])/1e8, 1), "errors": errs})
+                errs.append({"date": r["date"], "diff": round(lhs - rhs)})
+        gaps = []
+        for i in range(1, len(m)):
+            gap = m[i]["YesBalance"] - m[i-1]["TodayBalance"]
+            if abs(gap) > 1000:
+                gaps.append({"from": m[i-1]["date"], "to": m[i]["date"],
+                             "prev_today": round(m[i-1]["TodayBalance"]),
+                             "this_yes": round(m[i]["YesBalance"]),
+                             "gap": round(gap)})
+        if not errs and not gaps:
+            vd, det = "PASS", "公式與日鏈皆相符（已按日合併重複列）"
+        elif not errs and gaps:
+            vd, det = "INFO", (f"公式全對，但日鏈有{len(gaps)}處落差 — "
+                               f"常見於 FinMind 缺漏個別交易日（非數值錯誤），餘額本身可用")
+        else:
+            vd, det = "FAIL", f"公式誤差{len(errs)}筆"
+        add("融資餘額恆等式（今=昨+買-賣-償）", vd, det,
+            {"latest_balance_yi": round(m[-1]["TodayBalance"] / 1e8, 1),
+             "rows_per_date_gt1": dup_dates, "formula_errors": errs,
+             "chain_gaps": gaps, "dates_checked": [x["date"] for x in m]})
     except Exception as e:
         add("融資餘額恆等式", "FAIL", str(e))
 
@@ -186,33 +248,53 @@ async def audit_full():
     except Exception as e:
         add("ADL 累積鏈", "FAIL", str(e))
 
-    # 7. 三大法人：Mongo Σ個股(股) vs TWSE T86 Σ(股)
+    # 7. 三大法人：逐檔硬比對（同一上市股 Mongo 必須等於 T86）+ 原始欄位揭露
     try:
         chip_dates = await db.market_chips.distinct("date")
-        if chip_dates:
+        if not chip_dates:
+            add("外資買賣超逐檔交叉", "INFO", "Mongo 尚無籌碼資料（需先回補）")
+        else:
             cd = sorted(chip_dates)[-1]
-            agg = await db.market_chips.aggregate([
-                {"$match": {"date": cd}},
-                {"$group": {"_id": None, "f": {"$sum": "$foreign_net"}, "t": {"$sum": "$trust_net"}}}
-            ]).to_list(1)
-            mongo_f = agg[0]["f"] if agg else 0
             url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&selectType=ALL"
-            async with httpx.AsyncClient(timeout=15, verify=False) as c:
-                r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            t86 = r.json().get("data", [])
+            async with httpx.AsyncClient(timeout=20, verify=False) as c2:
+                r = await c2.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            j = r.json()
             def sf(s):
                 try: return float(str(s).replace(",", ""))
-                except: return 0
-            t86_f = sum(sf(x[4]) for x in t86 if len(x) > 4)
-            ratio = round(mongo_f / t86_f, 3) if t86_f else None
-            add("外資買賣超（FinMind全市場 vs T86上市）", "INFO",
-                f"Mongo(上市+上櫃+興櫃) {round(mongo_f/1e8,2)}億股 vs T86(僅上市) {round(t86_f/1e8,2)}億股，"
-                f"比值{ratio}（母體不同，方向一致即合理）",
-                {"mongo_date": cd, "mongo_foreign_shares": mongo_f, "t86_foreign_shares": t86_f})
-        else:
-            add("外資買賣超交叉", "INFO", "Mongo 尚無籌碼資料（需先回補）")
+                except: return 0.0
+            t86 = {}
+            for x in j.get("data", []):
+                if len(x) > 11:
+                    t86[str(x[0]).strip()] = {"foreign": sf(x[4]), "trust": sf(x[10])}
+            checks, bad = [], 0
+            for t in ("2330", "2317", "2327", "2454", "2412"):
+                mg = await db.market_chips.find_one({"_id": f"{cd}_{t}"})
+                if not mg or t not in t86:
+                    continue
+                mf, tf = mg.get("foreign_net", 0), t86[t]["foreign"]
+                mt, tt = mg.get("trust_net", 0), t86[t]["trust"]
+                okf = abs(mf - tf) <= max(1000, abs(tf) * 0.02)
+                okt = abs(mt - tt) <= max(1000, abs(tt) * 0.02)
+                if not (okf and okt):
+                    bad += 1
+                checks.append({"ticker": t, "mongo_foreign": mf, "t86_foreign": tf,
+                               "mongo_trust": mt, "t86_trust": tt, "match": okf and okt})
+            wide_fields = None
+            try:
+                w = await _fm("TaiwanStockInstitutionalInvestorsBuySellWide", cd)
+                if w:
+                    wide_fields = list(w[0].keys())
+            except Exception:
+                pass
+            if not checks:
+                add("外資買賣超逐檔交叉", "INFO", f"{cd} 無可比對標的（T86 當日可能未更新）")
+            else:
+                add("外資/投信逐檔交叉（Mongo vs T86 官方）",
+                    "PASS" if bad == 0 else "FAIL",
+                    f"{cd} 比對{len(checks)}檔，不符{bad}檔（單位:股，容差2%）",
+                    {"checks": checks, "wide_dataset_fields": wide_fields})
     except Exception as e:
-        add("外資買賣超交叉", "WARN", str(e))
+        add("外資買賣超逐檔交叉", "WARN", str(e))
 
     # 8. 分K vs 日線：最後一分K收盤/高低 = 日線收盤/高低
     try:
