@@ -101,6 +101,43 @@ async def _latest_bulk(dataset: str, max_days: int = 10):
             return ds, rows, probe
     return None, [], probe
 
+async def _latest_complete_bulk(dataset: str, max_days: int = 10, min_ratio: float = 0.6):
+    """找最近一個「資料完整」的交易日。
+    完整度 = 該日筆數 / 前面有資料日的最大筆數；低於 min_ratio 視為爬取不完整並往前退。
+    回傳 (date, rows, probe, quality)"""
+    found = []          # [(date, rows)]
+    probe = {}
+    for ds in _recent_trading_days(max_days):
+        try:
+            rows = await _bulk_day(dataset, ds)
+        except PermissionError:
+            raise
+        except Exception:
+            probe[ds] = None
+            continue
+        probe[ds] = len(rows)
+        if rows:
+            found.append((ds, rows))
+            if len(found) >= 4:
+                break
+    if not found:
+        return None, [], probe, {"status": "no_data"}
+
+    baseline = max(len(r) for _, r in found)
+    quality = {"baseline_rows": baseline, "skipped": []}
+    for ds, rows in found:                       # found 已由新到舊
+        ratio = len(rows) / baseline if baseline else 0
+        if ratio >= min_ratio:
+            quality.update({"status": "ok", "used_date": ds,
+                            "rows": len(rows), "completeness_pct": round(ratio * 100, 1)})
+            return ds, rows, probe, quality
+        quality["skipped"].append({"date": ds, "rows": len(rows),
+                                   "completeness_pct": round(ratio * 100, 1)})
+    ds, rows = found[0]
+    quality.update({"status": "all_incomplete", "used_date": ds, "rows": len(rows),
+                    "completeness_pct": round(len(rows) / baseline * 100, 1) if baseline else 0})
+    return ds, rows, probe, quality
+
 @router.get("/list")
 async def etf_list():
     try:
@@ -191,10 +228,12 @@ async def etf_debug(days: int = 10):
 @router.get("/overview")
 async def etf_overview():
     try:
-        date, chg, probe = await _latest_bulk("TaiwanStockActiveETFHoldingChange", 10)
+        date, chg, probe, quality = await _latest_complete_bulk(
+            "TaiwanStockActiveETFHoldingChange", 10)
         if not date:
             return {"error": "近10個交易日無異動資料", "rows_per_trading_day": probe}
-        h_date, hold, _ = await _latest_bulk("TaiwanStockActiveETFHolding", 10)
+        h_date, hold, _, h_quality = await _latest_complete_bulk(
+            "TaiwanStockActiveETFHolding", 10)
         price_map = {}
         for h in (hold or []):
             cid = str(h.get("component_stock_id", ""))
@@ -232,6 +271,7 @@ async def etf_overview():
                 "source_lag_trading_days": lag,
                 "etf_count": len({str(r.get("stock_id")) for r in chg}),
                 "rows_per_trading_day": probe,
+                "data_quality": quality, "holding_quality": h_quality,
                 "top_buys": sorted([x for x in rows if x["net_lots"] > 0], key=keyf, reverse=True)[:15],
                 "top_sells": sorted([x for x in rows if x["net_lots"] < 0], key=keyf)[:15],
                 "note": "含申購贖回造成的等比例增減；權重變化請看單一ETF明細"}
