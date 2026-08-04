@@ -47,6 +47,14 @@ async def backfill(background_tasks: BackgroundTasks, days: int = 130):
     background_tasks.add_task(run_backfill, days)
     return {"status": "started", "days": days, "check": "/signals/status"}
 
+@router.get("/rebuild-chips")
+async def rebuild_chips_ep(background_tasks: BackgroundTasks, days: int = 90):
+    """欄位解析修正後重建籌碼歷史（背景執行，約2分鐘）"""
+    from services.snapshot import rebuild_chips
+    background_tasks.add_task(rebuild_chips, days)
+    return {"status": "started", "days": days,
+            "note": "背景執行約2分鐘，完成後 /audit/full 的外資交叉檢查應轉 PASS"}
+
 @router.get("/snapshot-now")
 async def snapshot_now():
     from services.snapshot import run_daily_snapshot
