@@ -31,12 +31,14 @@ async def get_tw_realtime_price(ticker: str) -> dict | None:
         _tok = _os.getenv("FINMIND_TOKEN", "")
         if _tok:
             async with httpx.AsyncClient(timeout=5) as client:
-                r0 = await client.get("https://api.finmindtrade.com/api/v4/data",
-                    params={"dataset": "taiwan_stock_tick_snapshot",
-                            "data_id": ticker, "token": _tok})
+                r0 = await client.get("https://api.finmindtrade.com/api/v4/taiwan_stock_tick_snapshot",
+                    params={"data_id": ticker, "token": _tok})
             j0 = r0.json()
-            if j0.get("status") == 200 and j0.get("data"):
-                it = j0["data"][-1]
+            _d0 = j0.get("data")
+            if isinstance(_d0, dict):
+                _d0 = [_d0]
+            if _d0:
+                it = _d0[-1]
                 px = float(it.get("close", 0) or 0)
                 if px > 0:
                     dt = str(it.get("date", ""))
