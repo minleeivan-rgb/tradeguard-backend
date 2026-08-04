@@ -117,8 +117,8 @@ async def get_tw_technical(stock_id: str) -> dict:
 
         # RSI
         delta = closes.diff()
-        gain = delta.clip(lower=0).rolling(14).mean()
-        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
         rsi = round(float(100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1]))), 1) if loss.iloc[-1] > 0 else 50.0
 
         # KD
@@ -219,8 +219,8 @@ async def get_tw_index_data(days: int = 120) -> dict | None:
         change_pct = round((current - prev) / prev * 100, 2)
         # RSI
         delta = closes.diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        gain  = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        loss  = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
         rsi = round(float(100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1]))), 1) \
               if loss.iloc[-1] > 0 else 50.0
         # KD
