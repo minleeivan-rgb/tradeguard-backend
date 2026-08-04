@@ -34,8 +34,8 @@ def _yf_data(ticker: str) -> dict | None:
         prev = round(float(closes.iloc[-2]), 4)
         chg  = round((cur - prev) / prev * 100, 2)
         delta = closes.diff()
-        gain  = delta.clip(lower=0).rolling(14).mean()
-        loss  = (-delta.clip(upper=0)).rolling(14).mean()
+        gain  = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+        loss  = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
         rsi   = round(float(100 - (100 / (1 + gain.iloc[-1] / loss.iloc[-1]))), 1) \
                 if loss.iloc[-1] > 0 else 50.0
         lo9 = closes.rolling(9).min()
@@ -278,6 +278,7 @@ async def get_tw_market():
             breadth = {"up": up, "down": down, "flat": flat,
                        "limit_up": limit_up, "limit_down": limit_down, "ratio": ratio,
                        "breadth": "強勢" if ratio > 2 else "弱勢" if ratio < 0.5 else "平衡",
+                       "universe": "上市(TWSE OpenAPI)",
                        "data_date": _tw_last_trading_label()}
     except Exception as e:
         print(f"[market] breadth: {e}")
