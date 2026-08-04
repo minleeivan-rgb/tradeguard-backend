@@ -132,8 +132,25 @@ def _safe_float(s):
 
 async def _margin_trend_data() -> dict | None:
     rows = await _fm_total("TaiwanStockTotalMarginPurchaseShortSale", days=45)
-    m = [r for r in rows if r.get("name") == "MarginPurchaseMoney"]
-    m.sort(key=lambda x: x["date"])
+    raw = [r for r in rows if r.get("name") == "MarginPurchaseMoney"]
+    bydate = {}
+    for r in raw:
+        bydate.setdefault(r["date"], []).append(r)
+    m = []
+    KEYS = ("TodayBalance", "YesBalance", "buy", "sell", "Return")
+    for d in sorted(bydate):
+        rs = bydate[d]
+        if len(rs) == 1:
+            m.append(rs[0])
+        else:
+            vals = {tuple(float(x.get(k, 0) or 0) for k in KEYS) for x in rs}
+            if len(vals) == 1:
+                m.append(rs[0])          # 同值重複列 → 去重
+            else:
+                agg = {"date": d}        # 多市場分列 → 合計
+                for k in KEYS:
+                    agg[k] = sum(float(x.get(k, 0) or 0) for x in rs)
+                m.append(agg)
     m = m[-20:]
     if not m:
         return None
@@ -240,12 +257,14 @@ async def get_tw_market():
             # Sponsor 即時：snapshot 001 覆蓋盤中點位
             try:
                 async with httpx.AsyncClient(timeout=5) as _c:
-                    _r = await _c.get(FINMIND_BASE, params={
-                        "dataset": "taiwan_stock_tick_snapshot",
-                        "data_id": "001", "token": FINMIND_TOKEN})
+                    _r = await _c.get("https://api.finmindtrade.com/api/v4/taiwan_stock_tick_snapshot",
+                                      params={"data_id": "001", "token": FINMIND_TOKEN})
                 _j = _r.json()
-                if _j.get("status") == 200 and _j.get("data"):
-                    _it = _j["data"][-1]
+                _dd = _j.get("data")
+                if isinstance(_dd, dict):
+                    _dd = [_dd]
+                if _dd:
+                    _it = _dd[-1]
                     _px = float(_it.get("close", 0) or 0)
                     if _px > 0:
                         prev = data["closes"][-2] if len(data["closes"]) >= 2 else _px
