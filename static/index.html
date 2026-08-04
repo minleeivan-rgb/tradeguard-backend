@@ -2394,6 +2394,12 @@ async function loadEtf(){
       return;
     }
     window._etfLatestDate=r.date;
+    if(r.source_lag_trading_days>0){
+      ov.insertAdjacentHTML('beforebegin','');
+      var _b=document.getElementById('etfLagBanner');
+      if(!_b){_b=document.createElement('div');_b.id='etfLagBanner';ov.parentNode.insertBefore(_b,ov);}
+      _b.innerHTML='<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:8px 12px;border-radius:8px;margin-bottom:8px;line-height:1.6">FinMind 來源資料落後 '+r.source_lag_trading_days+' 個交易日（最新僅到 '+r.date+'，應為 '+r.expected_latest_trading_day+'）— 此頁數字非最新，暫勿作為進出依據</div>';
+    }else{var _b2=document.getElementById('etfLagBanner');if(_b2)_b2.innerHTML='';}
     document.getElementById('etfDate').textContent='資料日期：'+r.date+'（'+r.etf_count+' 檔主動式ETF）· '+(r.note||'');
     function col(title,items,color){
       if(!items||!items.length)return'<div style="flex:1"><div style="font-size:12px;color:#888;margin-bottom:6px">'+title+'</div><div style="color:#aaa;font-size:12px">無</div></div>';
@@ -2422,7 +2428,7 @@ async function loadEtfDetail(){
     var r=await fetch(API_BASE+'/etf/'+id+'/detail').then(x=>x.json());
     if(r.error){el.innerHTML='<div style="color:'+(r.tier_required?'#c97c0a':'#d63b3b')+';font-size:13px;padding:10px;line-height:1.7">'+r.error+'</div>';return;}
     var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:8px">資料日期：'+r.date+(r.prev_date?'（權重變化 vs '+r.prev_date+'）':'')+' · '+(r.note||'')+'</div>';
-    if(window._etfLatestDate&&r.date<window._etfLatestDate){html+='<div style="font-size:12px;color:#c97c0a;background:#FAEEDA;padding:6px 10px;border-radius:8px;margin-bottom:8px">此檔來源尚未更新至 '+window._etfLatestDate+'（目前 '+r.date+'）— 各投信公告時間不一，非壞掉，稍後會自動補上</div>';}
+    if(r.lag_trading_days>0){html+='<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:6px 10px;border-radius:8px;margin-bottom:8px;line-height:1.6">此檔資料落後 '+r.lag_trading_days+' 個交易日（最新 '+r.date+'，應為 '+r.expected_latest_trading_day+'）— 來源未更新，數字非今日狀態</div>';}
     function chips(title,items,color,sign){
       if(!items||!items.length)return'';
       return'<div style="margin-bottom:8px"><span style="font-size:12px;font-weight:600;color:'+color+'">'+title+'：</span>'+
