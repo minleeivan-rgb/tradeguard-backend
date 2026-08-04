@@ -188,7 +188,8 @@ async def pct_above_ma20() -> dict:
     above = int(((c > ma20) & valid).sum())
     pct = round(above / n * 100, 1)
     label = "過熱" if pct > 80 else "偏弱洗盤完成區" if pct < 20 else "中性"
-    return {"pct": pct, "above": above, "total": n, "label": label, "data_date": close.index[-1]}
+    return {"pct": pct, "above": above, "total": n, "label": label,
+            "universe": "上市+上櫃+興櫃(FinMind)", "data_date": close.index[-1]}
 
 async def adl_status() -> dict:
     docs = [d async for d in db.market_breadth.find({}, {"_id": 0}).sort("date", 1)]
