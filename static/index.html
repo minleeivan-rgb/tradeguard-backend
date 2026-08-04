@@ -2379,7 +2379,7 @@ async function loadEtf(){
   ov.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
   if(!_etfListLoaded){
     try{
-      var l=await fetch(API_BASE+'/etf/list').then(r=>r.json());
+      var l=await fetch(API_BASE+'/etf/list?_='+Date.now()).then(r=>r.json());
       var sel=document.getElementById('etfSelect');
       (l.items||[]).forEach(function(x){
         var o=document.createElement('option');o.value=x.stock_id;o.textContent=x.stock_id+' '+x.name;sel.appendChild(o);
@@ -2388,7 +2388,7 @@ async function loadEtf(){
     }catch(e){}
   }
   try{
-    var r=await fetch(API_BASE+'/etf/overview').then(x=>x.json());
+    var r=await fetch(API_BASE+'/etf/overview?_='+Date.now()).then(x=>x.json());
     if(r.error){
       ov.innerHTML='<div style="color:'+(r.tier_required?'#c97c0a':'#d63b3b')+';font-size:13px;padding:10px;line-height:1.7">'+r.error+'</div>';
       return;
@@ -2427,7 +2427,7 @@ async function loadEtfDetail(){
   if(!id){el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">選擇一檔主動式ETF</div>';return;}
   el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
   try{
-    var r=await fetch(API_BASE+'/etf/'+id+'/detail').then(x=>x.json());
+    var r=await fetch(API_BASE+'/etf/'+id+'/detail?_='+Date.now()).then(x=>x.json());
     if(r.error){el.innerHTML='<div style="color:'+(r.tier_required?'#c97c0a':'#d63b3b')+';font-size:13px;padding:10px;line-height:1.7">'+r.error+'</div>';return;}
     var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:8px">資料日期：'+r.date+(r.prev_date?'（權重變化 vs '+r.prev_date+'）':'')+' · '+(r.note||'')+'</div>';
     if(r.lag_trading_days>0){html+='<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:6px 10px;border-radius:8px;margin-bottom:8px;line-height:1.6">此檔資料落後 '+r.lag_trading_days+' 個交易日（最新 '+r.date+'，應為 '+r.expected_latest_trading_day+'）— 來源未更新，數字非今日狀態</div>';}
