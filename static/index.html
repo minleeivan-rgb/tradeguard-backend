@@ -2398,7 +2398,9 @@ async function loadEtf(){
       ov.insertAdjacentHTML('beforebegin','');
       var _b=document.getElementById('etfLagBanner');
       if(!_b){_b=document.createElement('div');_b.id='etfLagBanner';ov.parentNode.insertBefore(_b,ov);}
-      _b.innerHTML='<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:8px 12px;border-radius:8px;margin-bottom:8px;line-height:1.6">FinMind 來源資料落後 '+r.source_lag_trading_days+' 個交易日（最新僅到 '+r.date+'，應為 '+r.expected_latest_trading_day+'）— 此頁數字非最新，暫勿作為進出依據</div>';
+      var _q=r.data_quality||{},_sk=(_q.skipped||[]);
+      var _extra=_sk.length?('　已略過爬取不完整的 '+_sk.map(function(s){return s.date+'('+s.completeness_pct+'%)';}).join('、')):'';
+      _b.innerHTML='<div style="font-size:12px;color:#A32D2D;background:#FCEBEB;padding:8px 12px;border-radius:8px;margin-bottom:8px;line-height:1.6">FinMind 來源資料落後 '+r.source_lag_trading_days+' 個交易日（採用 '+r.date+'，應為 '+r.expected_latest_trading_day+'）— 來源爬蟲異常，此頁數字非最新，暫勿作為進出依據'+_extra+'</div>';
     }else{var _b2=document.getElementById('etfLagBanner');if(_b2)_b2.innerHTML='';}
     document.getElementById('etfDate').textContent='資料日期：'+r.date+'（'+r.etf_count+' 檔主動式ETF）· '+(r.note||'');
     function col(title,items,color){
