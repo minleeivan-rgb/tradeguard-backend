@@ -60,19 +60,46 @@ async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) ->
         raise PermissionError(SPONSOR_MSG)
     raise Exception(f"{dataset}: {msg}")
 
-async def _range_rows(dataset: str, days: int = 12, data_id: str = None):
-    """一次查區間，回傳 (最新日期, 該日資料, 全區間日期→筆數)"""
-    start = (_tw_now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    end   = _tw_now().strftime("%Y-%m-%d")
-    rows = await _fm(dataset, start, end, data_id)
-    by_date = {}
-    for r in rows:
-        by_date.setdefault(r.get("date"), []).append(r)
-    if not by_date:
-        return None, [], {}
-    latest = max(by_date)
-    counts = {d: len(v) for d, v in sorted(by_date.items())}
-    return latest, by_date[latest], counts
+async def _bulk_day(dataset: str, date: str) -> list:
+    """全市場批次查詢＝單日模式（FinMind 不帶 data_id 時會忽略 end_date）"""
+    return await _fm(dataset, date, date)
+
+def _recent_trading_days(n: int = 10) -> list:
+    """由今天往回列出 n 個交易日（新→舊）"""
+    out, d = [], _tw_now()
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d.strftime("%Y-%m-%d"))
+        d -= timedelta(days=1)
+    return out
+
+async def _probe_days(dataset: str, n: int = 10) -> dict:
+    """逐日探測，回傳每個交易日的筆數（0 = 來源當天無資料）"""
+    counts = {}
+    for ds in _recent_trading_days(n):
+        try:
+            counts[ds] = len(await _bulk_day(dataset, ds))
+        except PermissionError:
+            raise
+        except Exception:
+            counts[ds] = None      # None = 查詢失敗（非「無資料」）
+    return counts
+
+async def _latest_bulk(dataset: str, max_days: int = 10):
+    """往回找最近一個有資料的交易日，回傳 (date, rows, 探測記錄)"""
+    probe = {}
+    for ds in _recent_trading_days(max_days):
+        try:
+            rows = await _bulk_day(dataset, ds)
+        except PermissionError:
+            raise
+        except Exception:
+            probe[ds] = None
+            continue
+        probe[ds] = len(rows)
+        if rows:
+            return ds, rows, probe
+    return None, [], probe
 
 @router.get("/list")
 async def etf_list():
@@ -90,62 +117,73 @@ async def etf_list():
         return {"error": str(e), "items": []}
 
 @router.get("/freshness")
-async def etf_freshness():
-    """逐檔新鮮度：一次區間查詢，group by ETF 取最新日"""
+async def etf_freshness(days: int = 8):
+    """逐檔新鮮度：對最近N個交易日逐日批次查詢，group by ETF 取最新日"""
     try:
-        start = (_tw_now() - timedelta(days=14)).strftime("%Y-%m-%d")
-        end   = _tw_now().strftime("%Y-%m-%d")
-        rows = await _fm("TaiwanStockActiveETFHolding", start, end)
-        latest_by_etf, dates_all = {}, {}
-        for r in rows:
-            sid, d = str(r.get("stock_id", "")), r.get("date")
-            if not sid or not d:
+        latest_by_etf, rows_per_date = {}, {}
+        for ds in _recent_trading_days(days):
+            try:
+                rows = await _bulk_day("TaiwanStockActiveETFHolding", ds)
+            except PermissionError:
+                raise
+            except Exception:
+                rows_per_date[ds] = None
                 continue
-            if sid not in latest_by_etf or d > latest_by_etf[sid]:
-                latest_by_etf[sid] = d
-            dates_all[d] = dates_all.get(d, 0) + 1
+            rows_per_date[ds] = len(rows)
+            for r in rows:
+                sid = str(r.get("stock_id", ""))
+                if sid:
+                    if sid not in latest_by_etf or ds > latest_by_etf[sid]:
+                        latest_by_etf[sid] = ds
         if not latest_by_etf:
-            return {"error": "近14日無任何主動ETF持股資料", "dates_seen": dates_all}
+            return {"error": f"最近{days}個交易日皆無主動ETF持股資料",
+                    "rows_per_date": dict(sorted(rows_per_date.items()))}
         newest = max(latest_by_etf.values())
-        expected = _last_trading_day(1) if _tw_now().hour < 10 else _last_trading_day(0)
-        items = sorted(
-            [{"etf": k, "latest_date": v,
-              "lag_trading_days": _trading_days_between(v, newest)}
-             for k, v in latest_by_etf.items()],
-            key=lambda x: (x["latest_date"], x["etf"]))
+        expected = _last_trading_day(0)
+        items = sorted([{"etf": k, "latest_date": v,
+                         "lag_vs_newest": _trading_days_between(v, newest)}
+                        for k, v in latest_by_etf.items()],
+                       key=lambda x: (x["latest_date"], x["etf"]))
         return {"source_newest_date": newest,
                 "expected_latest_trading_day": expected,
                 "source_lag_trading_days": _trading_days_between(newest, expected),
                 "etf_count": len(items),
-                "stale_etfs": [x for x in items if x["lag_trading_days"] > 0],
+                "stale_etfs": [x for x in items if x["lag_vs_newest"] > 0],
                 "all": items,
-                "rows_per_date": dict(sorted(dates_all.items()))}
+                "rows_per_date": dict(sorted(rows_per_date.items())),
+                "note": "rows_per_date 為 0 代表來源當日確實無資料；null 代表查詢失敗"}
     except PermissionError as e:
         return {"error": str(e), "tier_required": "Sponsor"}
     except Exception as e:
         return {"error": str(e)}
 
 @router.get("/debug")
-async def etf_debug():
-    """來源真相：三個資料集近14日每天筆數 + 原始回應形狀"""
+async def etf_debug(days: int = 10):
+    """來源真相：逐日批次探測，0 = 來源當日無資料"""
     out = {"tw_now": _tw_now().isoformat(),
-           "expected_last_trading_day": _last_trading_day(0)}
-    for key, ds in [("holding", "TaiwanStockActiveETFHolding"),
-                    ("holding_change", "TaiwanStockActiveETFHoldingChange")]:
+           "expected_last_trading_day": _last_trading_day(0),
+           "probe_note": "全市場批次查詢為單日模式，故逐日探測；0=無資料，null=查詢失敗"}
+    for key, ds_name in [("holding", "TaiwanStockActiveETFHolding"),
+                         ("holding_change", "TaiwanStockActiveETFHoldingChange")]:
         try:
-            latest, rows, counts = await _range_rows(ds, days=14)
-            out[key] = {"ok": True, "latest_date": latest,
-                        "rows_on_latest": len(rows),
-                        "dates_and_counts": counts,
-                        "sample_keys": list(rows[0].keys()) if rows else None}
+            probe = await _probe_days(ds_name, days)
+            have = [d for d, n in probe.items() if n]
+            out[key] = {"ok": True,
+                        "latest_date_with_data": max(have) if have else None,
+                        "rows_per_trading_day": probe}
         except Exception as e:
             out[key] = {"ok": False, "error": str(e)}
-    for etf in ("00981A", "00980A"):
+    for etf in ("00981A", "00980A", "00982A"):
         try:
-            latest, rows, counts = await _range_rows("TaiwanStockActiveETFHolding",
-                                                     days=14, data_id=etf)
-            out[f"holding_{etf}"] = {"ok": True, "latest_date": latest,
-                                     "dates_and_counts": counts}
+            start = (_tw_now() - timedelta(days=16)).strftime("%Y-%m-%d")
+            end   = _tw_now().strftime("%Y-%m-%d")
+            rows  = await _fm("TaiwanStockActiveETFHolding", start, end, etf)
+            byd = {}
+            for r in rows:
+                byd[r["date"]] = byd.get(r["date"], 0) + 1
+            out[f"holding_{etf}"] = {"ok": True,
+                                     "latest_date": max(byd) if byd else None,
+                                     "dates_and_counts": dict(sorted(byd.items()))}
         except Exception as e:
             out[f"holding_{etf}"] = {"ok": False, "error": str(e)}
     return out
@@ -153,10 +191,10 @@ async def etf_debug():
 @router.get("/overview")
 async def etf_overview():
     try:
-        date, chg, counts = await _range_rows("TaiwanStockActiveETFHoldingChange", days=12)
+        date, chg, probe = await _latest_bulk("TaiwanStockActiveETFHoldingChange", 10)
         if not date:
-            return {"error": "近12日無異動資料"}
-        h_date, hold, _ = await _range_rows("TaiwanStockActiveETFHolding", days=12)
+            return {"error": "近10個交易日無異動資料", "rows_per_trading_day": probe}
+        h_date, hold, _ = await _latest_bulk("TaiwanStockActiveETFHolding", 10)
         price_map = {}
         for h in (hold or []):
             cid = str(h.get("component_stock_id", ""))
@@ -193,7 +231,7 @@ async def etf_overview():
                 "expected_latest_trading_day": expected,
                 "source_lag_trading_days": lag,
                 "etf_count": len({str(r.get("stock_id")) for r in chg}),
-                "recent_dates": counts,
+                "rows_per_trading_day": probe,
                 "top_buys": sorted([x for x in rows if x["net_lots"] > 0], key=keyf, reverse=True)[:15],
                 "top_sells": sorted([x for x in rows if x["net_lots"] < 0], key=keyf)[:15],
                 "note": "含申購贖回造成的等比例增減；權重變化請看單一ETF明細"}
