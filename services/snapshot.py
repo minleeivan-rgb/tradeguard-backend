@@ -73,17 +73,26 @@ async def snapshot_chips(date_str: str) -> int:
         sid = str(r.get("stock_id", "")).strip()
         if not (sid.isdigit() and 4 <= len(sid) <= 5):
             continue
-        def g(k):
+        # 樣式比對：任何 *_buy / *_sell 欄位自動歸類，不依賴精確欄位名
+        foreign = trust = dealer = 0.0
+        for k, v in r.items():
+            lk = str(k).lower()
+            if lk.endswith("_buy"):
+                sign = 1.0
+            elif lk.endswith("_sell"):
+                sign = -1.0
+            else:
+                continue
             try:
-                return float(r.get(k, 0) or 0)
+                val = float(v or 0)
             except Exception:
-                return 0.0
-        trust   = g("Investment_Trust_buy") - g("Investment_Trust_sell")
-        foreign = (g("Foreign_Investor_buy") - g("Foreign_Investor_sell")
-                   + g("Foreign_Dealer_Self_buy") - g("Foreign_Dealer_Self_sell"))
-        dealer  = (g("Dealer_buy") - g("Dealer_sell")
-                   + g("Dealer_self_buy") - g("Dealer_self_sell")
-                   + g("Dealer_Hedging_buy") - g("Dealer_Hedging_sell"))
+                continue
+            if "foreign" in lk:
+                foreign += sign * val
+            elif "investment_trust" in lk or "trust" in lk:
+                trust += sign * val
+            elif "dealer" in lk:
+                dealer += sign * val
         ops.append({"_id": f"{date_str}_{sid}", "date": date_str, "ticker": sid,
                     "trust_net": trust, "foreign_net": foreign, "dealer_net": dealer})
     if not ops:
@@ -206,3 +215,15 @@ async def db_status() -> dict:
         "chips_days": len(chip_dates),
         "backfill": backfill_state(),
     }
+
+async def rebuild_chips(days: int = 90) -> dict:
+    """用修正後的解析重建籌碼資料（覆蓋既有日期）"""
+    dates = sorted(await db.market_daily.distinct("date"))[-days:]
+    n = 0
+    for ds in dates:
+        try:
+            n += await snapshot_chips(ds)
+        except Exception as e:
+            print(f"[rebuild_chips] {ds}: {e}")
+        await asyncio.sleep(0.35)
+    return {"dates": len(dates), "rows": n}
