@@ -1,9 +1,10 @@
 """
-主動式ETF追蹤
-- /etf/list      主動式ETF清單（Free）
-- /etf/overview  全體主動ETF今日集體淨買/淨賣 Top（Sponsor）
-- /etf/{id}/detail  單一ETF：今日買賣異動 + 持股明細與權重變化（Sponsor）
-資料集：TaiwanStockActiveETFInfo / TaiwanStockActiveETFHoldingChange / TaiwanStockActiveETFHolding
+主動式ETF追蹤（區間查詢版）
+- /etf/list        主動式ETF清單
+- /etf/overview    全體集體買賣超（自動取來源最新有資料日）
+- /etf/{id}/detail 單一ETF持股與權重變化
+- /etf/freshness   逐檔新鮮度：每檔ETF的最新資料日，一眼看誰落後
+- /etf/debug       來源真相：近14日每天有幾筆資料、原始回應
 """
 import os
 from fastapi import APIRouter
@@ -16,7 +17,29 @@ FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
 FINMIND_BASE  = "https://api.finmindtrade.com/api/v4/data"
 TW_TZ = timezone(timedelta(hours=8))
 
-SPONSOR_MSG = "此資料集需 FinMind Sponsor 方案（$999/月）。你目前是 Backer，升級後此頁立即可用：finmindtrade.com"
+SPONSOR_MSG = "此資料集需 FinMind Sponsor 方案。若已升級仍出現此訊息，請確認 Railway 的 FINMIND_TOKEN 是新方案的 token"
+
+def _tw_now():
+    return datetime.now(TW_TZ)
+
+def _last_trading_day(offset: int = 0) -> str:
+    d = _tw_now() - timedelta(days=offset)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+def _trading_days_between(d_from: str, d_to: str) -> int:
+    try:
+        a = datetime.strptime(d_from, "%Y-%m-%d").date()
+        b = datetime.strptime(d_to, "%Y-%m-%d").date()
+    except Exception:
+        return 0
+    n, cur = 0, a
+    while cur < b:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:
+            n += 1
+    return n
 
 async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) -> list:
     params = {"dataset": dataset, "start_date": start, "token": FINMIND_TOKEN}
@@ -24,27 +47,32 @@ async def _fm(dataset: str, start: str, end: str = None, data_id: str = None) ->
         params["end_date"] = end
     if data_id:
         params["data_id"] = data_id
-    async with httpx.AsyncClient(timeout=40) as c:
+    async with httpx.AsyncClient(timeout=60) as c:
         r = await c.get(FINMIND_BASE, params=params)
-    j = r.json()
-    if j.get("status") != 200:
-        msg = str(j.get("msg", ""))
-        if "402" in str(j.get("status")) or "sponsor" in msg.lower() or "權限" in msg or "permission" in msg.lower():
-            raise PermissionError(SPONSOR_MSG)
-        raise Exception(f"{dataset}: {msg}")
-    return j.get("data", [])
+    try:
+        j = r.json()
+    except Exception:
+        raise Exception(f"{dataset} HTTP {r.status_code}: {r.text[:180]}")
+    if isinstance(j, dict) and isinstance(j.get("data"), list):
+        return j["data"]
+    msg = str(j)[:200]
+    if "402" in msg or "sponsor" in msg.lower() or "permission" in msg.lower():
+        raise PermissionError(SPONSOR_MSG)
+    raise Exception(f"{dataset}: {msg}")
 
-async def _latest_rows(dataset: str, data_id: str = None, lookback: int = 8):
-    """從今天往回找最近一個有資料的日期，回傳 (date, rows)"""
-    d = datetime.now(TW_TZ)
-    for _ in range(lookback):
-        if d.weekday() < 5:
-            ds = d.strftime("%Y-%m-%d")
-            rows = await _fm(dataset, ds, ds, data_id)
-            if rows:
-                return ds, rows
-        d -= timedelta(days=1)
-    return None, []
+async def _range_rows(dataset: str, days: int = 12, data_id: str = None):
+    """一次查區間，回傳 (最新日期, 該日資料, 全區間日期→筆數)"""
+    start = (_tw_now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end   = _tw_now().strftime("%Y-%m-%d")
+    rows = await _fm(dataset, start, end, data_id)
+    by_date = {}
+    for r in rows:
+        by_date.setdefault(r.get("date"), []).append(r)
+    if not by_date:
+        return None, [], {}
+    latest = max(by_date)
+    counts = {d: len(v) for d, v in sorted(by_date.items())}
+    return latest, by_date[latest], counts
 
 @router.get("/list")
 async def etf_list():
@@ -61,57 +89,113 @@ async def etf_list():
     except Exception as e:
         return {"error": str(e), "items": []}
 
+@router.get("/freshness")
+async def etf_freshness():
+    """逐檔新鮮度：一次區間查詢，group by ETF 取最新日"""
+    try:
+        start = (_tw_now() - timedelta(days=14)).strftime("%Y-%m-%d")
+        end   = _tw_now().strftime("%Y-%m-%d")
+        rows = await _fm("TaiwanStockActiveETFHolding", start, end)
+        latest_by_etf, dates_all = {}, {}
+        for r in rows:
+            sid, d = str(r.get("stock_id", "")), r.get("date")
+            if not sid or not d:
+                continue
+            if sid not in latest_by_etf or d > latest_by_etf[sid]:
+                latest_by_etf[sid] = d
+            dates_all[d] = dates_all.get(d, 0) + 1
+        if not latest_by_etf:
+            return {"error": "近14日無任何主動ETF持股資料", "dates_seen": dates_all}
+        newest = max(latest_by_etf.values())
+        expected = _last_trading_day(1) if _tw_now().hour < 10 else _last_trading_day(0)
+        items = sorted(
+            [{"etf": k, "latest_date": v,
+              "lag_trading_days": _trading_days_between(v, newest)}
+             for k, v in latest_by_etf.items()],
+            key=lambda x: (x["latest_date"], x["etf"]))
+        return {"source_newest_date": newest,
+                "expected_latest_trading_day": expected,
+                "source_lag_trading_days": _trading_days_between(newest, expected),
+                "etf_count": len(items),
+                "stale_etfs": [x for x in items if x["lag_trading_days"] > 0],
+                "all": items,
+                "rows_per_date": dict(sorted(dates_all.items()))}
+    except PermissionError as e:
+        return {"error": str(e), "tier_required": "Sponsor"}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/debug")
+async def etf_debug():
+    """來源真相：三個資料集近14日每天筆數 + 原始回應形狀"""
+    out = {"tw_now": _tw_now().isoformat(),
+           "expected_last_trading_day": _last_trading_day(0)}
+    for key, ds in [("holding", "TaiwanStockActiveETFHolding"),
+                    ("holding_change", "TaiwanStockActiveETFHoldingChange")]:
+        try:
+            latest, rows, counts = await _range_rows(ds, days=14)
+            out[key] = {"ok": True, "latest_date": latest,
+                        "rows_on_latest": len(rows),
+                        "dates_and_counts": counts,
+                        "sample_keys": list(rows[0].keys()) if rows else None}
+        except Exception as e:
+            out[key] = {"ok": False, "error": str(e)}
+    for etf in ("00981A", "00980A"):
+        try:
+            latest, rows, counts = await _range_rows("TaiwanStockActiveETFHolding",
+                                                     days=14, data_id=etf)
+            out[f"holding_{etf}"] = {"ok": True, "latest_date": latest,
+                                     "dates_and_counts": counts}
+        except Exception as e:
+            out[f"holding_{etf}"] = {"ok": False, "error": str(e)}
+    return out
+
 @router.get("/overview")
 async def etf_overview():
-    """全體主動式ETF最新一日：集體淨買超 / 淨賣超個股 Top"""
     try:
-        date, chg = await _latest_rows("TaiwanStockActiveETFHoldingChange")
+        date, chg, counts = await _range_rows("TaiwanStockActiveETFHoldingChange", days=12)
         if not date:
-            return {"error": "近期無異動資料（資料每日晚間更新）"}
-        # 同日持股明細 → 估價（market_value/shares）與權重
-        _, hold = await _latest_rows("TaiwanStockActiveETFHolding")
-        price_map, weight_map = {}, {}
-        for h in hold:
+            return {"error": "近12日無異動資料"}
+        h_date, hold, _ = await _range_rows("TaiwanStockActiveETFHolding", days=12)
+        price_map = {}
+        for h in (hold or []):
             cid = str(h.get("component_stock_id", ""))
             sh  = float(h.get("shares", 0) or 0)
             mv  = float(h.get("market_value", 0) or 0)
             if cid and sh > 0 and mv > 0 and str(h.get("currency", "TWD")).upper() in ("TWD", "NTD", ""):
                 price_map.setdefault(cid, mv / sh)
-            w = float(h.get("weight", 0) or 0)
-            weight_map[(str(h.get("stock_id")), cid)] = w
 
         agg = {}
         for r in chg:
-            cid  = str(r.get("component_stock_id", ""))
+            cid = str(r.get("component_stock_id", ""))
             if not (cid.isdigit() and 4 <= len(cid) <= 5):
                 continue
-            name = r.get("component_stock_name", cid)
             buy  = float(r.get("buy", 0) or 0)
             sell = float(r.get("sell", 0) or 0)
             net  = buy - sell
-            a = agg.setdefault(cid, {"ticker": cid, "name": name, "net_shares": 0.0,
-                                     "buy_etfs": set(), "sell_etfs": set()})
-            a["net_shares"] += net
+            a = agg.setdefault(cid, {"name": r.get("component_stock_name", cid),
+                                     "net": 0.0, "b": set(), "s": set()})
+            a["net"] += net
             etf = str(r.get("stock_id", ""))
-            if net > 0:
-                a["buy_etfs"].add(etf)
-            elif net < 0:
-                a["sell_etfs"].add(etf)
+            (a["b"] if net > 0 else a["s"]).add(etf)
 
         rows = []
         for cid, a in agg.items():
             price = price_map.get(cid)
-            est_val = round(a["net_shares"] * price / 1e8, 2) if price else None
             rows.append({"ticker": cid, "name": a["name"],
-                         "net_lots": round(a["net_shares"] / 1000, 0),
-                         "est_value_yi": est_val,
-                         "buy_etf_count": len(a["buy_etfs"]),
-                         "sell_etf_count": len(a["sell_etfs"])})
+                         "net_lots": round(a["net"] / 1000, 0),
+                         "est_value_yi": round(a["net"] * price / 1e8, 2) if price else None,
+                         "buy_etf_count": len(a["b"]), "sell_etf_count": len(a["s"])})
         keyf = lambda x: (x["est_value_yi"] if x["est_value_yi"] is not None else x["net_lots"] / 1000)
-        buys  = sorted([x for x in rows if x["net_lots"] > 0], key=keyf, reverse=True)[:15]
-        sells = sorted([x for x in rows if x["net_lots"] < 0], key=keyf)[:15]
-        return {"date": date, "etf_count": len({str(r.get('stock_id')) for r in chg}),
-                "top_buys": buys, "top_sells": sells,
+        expected = _last_trading_day(0)
+        lag = _trading_days_between(date, expected)
+        return {"date": date, "holding_date": h_date,
+                "expected_latest_trading_day": expected,
+                "source_lag_trading_days": lag,
+                "etf_count": len({str(r.get("stock_id")) for r in chg}),
+                "recent_dates": counts,
+                "top_buys": sorted([x for x in rows if x["net_lots"] > 0], key=keyf, reverse=True)[:15],
+                "top_sells": sorted([x for x in rows if x["net_lots"] < 0], key=keyf)[:15],
                 "note": "含申購贖回造成的等比例增減；權重變化請看單一ETF明細"}
     except PermissionError as e:
         return {"error": str(e), "tier_required": "Sponsor"}
@@ -120,39 +204,34 @@ async def etf_overview():
 
 @router.get("/{etf_id}/detail")
 async def etf_detail(etf_id: str):
-    """單一主動ETF：今日買賣異動 + 持股明細（權重、權重日變化）"""
     try:
-        start = (datetime.now(TW_TZ) - timedelta(days=12)).strftime("%Y-%m-%d")
-        end   = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+        start = (_tw_now() - timedelta(days=14)).strftime("%Y-%m-%d")
+        end   = _tw_now().strftime("%Y-%m-%d")
         hold  = await _fm("TaiwanStockActiveETFHolding", start, end, etf_id)
         if not hold:
-            return {"error": "此ETF近期無持股資料"}
+            return {"error": "此ETF近14日無持股資料"}
         dates = sorted({h["date"] for h in hold})
         d_now = dates[-1]
         d_prev = dates[-2] if len(dates) > 1 else None
-        cur  = [h for h in hold if h["date"] == d_now]
+        cur = [h for h in hold if h["date"] == d_now]
         prevw = {str(h.get("component_stock_id")): float(h.get("weight", 0) or 0)
                  for h in hold if d_prev and h["date"] == d_prev}
 
         holdings = []
         for h in cur:
             cid = str(h.get("component_stock_id", ""))
-            w   = float(h.get("weight", 0) or 0)
-            pw  = prevw.get(cid)
-            holdings.append({
-                "ticker": cid, "name": h.get("component_stock_name", cid),
-                "asset_type": h.get("asset_type", ""),
-                "weight": round(w, 2),
-                "weight_delta": round(w - pw, 2) if pw is not None else None,
-                "shares_lots": round(float(h.get("shares", 0) or 0) / 1000, 0),
-                "market_value_yi": round(float(h.get("market_value", 0) or 0) / 1e8, 2),
-            })
+            w = float(h.get("weight", 0) or 0)
+            pw = prevw.get(cid)
+            holdings.append({"ticker": cid, "name": h.get("component_stock_name", cid),
+                             "asset_type": h.get("asset_type", ""), "weight": round(w, 2),
+                             "weight_delta": round(w - pw, 2) if pw is not None else None,
+                             "shares_lots": round(float(h.get("shares", 0) or 0) / 1000, 0),
+                             "market_value_yi": round(float(h.get("market_value", 0) or 0) / 1e8, 2)})
         holdings.sort(key=lambda x: -x["weight"])
 
         changes = []
         try:
-            chg = await _fm("TaiwanStockActiveETFHoldingChange", d_now, d_now, etf_id)
-            for r in chg:
+            for r in await _fm("TaiwanStockActiveETFHoldingChange", d_now, d_now, etf_id):
                 buy  = float(r.get("buy", 0) or 0)
                 sell = float(r.get("sell", 0) or 0)
                 changes.append({"ticker": str(r.get("component_stock_id", "")),
@@ -164,11 +243,14 @@ async def etf_detail(etf_id: str):
         except Exception:
             pass
 
-        active_adds = [h for h in holdings if h["weight_delta"] is not None and h["weight_delta"] >= 0.15]
-        active_cuts = [h for h in holdings if h["weight_delta"] is not None and h["weight_delta"] <= -0.15]
+        expected = _last_trading_day(0)
         return {"etf_id": etf_id, "date": d_now, "prev_date": d_prev,
+                "available_dates": dates,
+                "expected_latest_trading_day": expected,
+                "lag_trading_days": _trading_days_between(d_now, expected),
                 "holdings": holdings[:30], "changes": changes[:20],
-                "active_adds": active_adds[:10], "active_cuts": active_cuts[:10],
+                "active_adds": [h for h in holdings if h["weight_delta"] is not None and h["weight_delta"] >= 0.15][:10],
+                "active_cuts": [h for h in holdings if h["weight_delta"] is not None and h["weight_delta"] <= -0.15][:10],
                 "note": "權重變化 ≥±0.15% 視為主動調整（排除申贖等比例效果）"}
     except PermissionError as e:
         return {"error": str(e), "tier_required": "Sponsor"}
