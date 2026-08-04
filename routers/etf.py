@@ -388,3 +388,42 @@ async def probe_official(date: str = ""):
             out["results"][name] = {"error": str(e)[:180]}
     return out
 
+@router.get("/coverage")
+async def etf_coverage(date: str = "", etf: str = ""):
+    """指定日期的 ETF 覆蓋狀況：那天到底有哪幾檔 ETF 的資料（即時查 FinMind，不經快取）"""
+    d = date or _last_trading_day(0)
+    out = {"date": d, "queried_at": _tw_now().isoformat()}
+    try:
+        rows = await _bulk_day("TaiwanStockActiveETFHolding", d)
+        by_etf = {}
+        for r in rows:
+            sid = str(r.get("stock_id", ""))
+            by_etf[sid] = by_etf.get(sid, 0) + 1
+        out["total_rows"] = len(rows)
+        out["etf_count"] = len(by_etf)
+        out["etfs_present"] = dict(sorted(by_etf.items()))
+        try:
+            info = await _fm("TaiwanStockActiveETFInfo", "2025-01-01")
+            all_ids = sorted({str(x["stock_id"]) for x in info})
+            out["etfs_missing"] = [x for x in all_ids if x not in by_etf]
+        except Exception:
+            pass
+    except Exception as e:
+        out["bulk_error"] = str(e)
+
+    target = etf or "00981A"
+    try:
+        start = (_tw_now() - timedelta(days=16)).strftime("%Y-%m-%d")
+        end   = _tw_now().strftime("%Y-%m-%d")
+        rows2 = await _fm("TaiwanStockActiveETFHolding", start, end, target)
+        byd = {}
+        for r in rows2:
+            byd[r["date"]] = byd.get(r["date"], 0) + 1
+        out[f"{target}_dates"] = dict(sorted(byd.items()))
+        out[f"{target}_latest"] = max(byd) if byd else None
+        rows3 = await _fm("TaiwanStockActiveETFHolding", d, d, target)
+        out[f"{target}_on_{d}"] = len(rows3)
+    except Exception as e:
+        out[f"{target}_error"] = str(e)
+    return out
+
