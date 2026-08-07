@@ -1235,7 +1235,7 @@ async function loadAlerts() {
     area.innerHTML = `<div class="card-title" style="padding:0 0 8px">⚠ 警示中心</div>` +
       data.alerts.map(a => `<div class="alert-c ${a.severity==='medium'?'warn':''}">
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <div><div class="at">${a.ticker} — ${a.message}</div></div>
+          <div><div class="at">${a.ticker}${a.name && a.name !== a.ticker ? ' ' + a.name : ''} — ${a.message}</div></div>
           <span class="badge ${a.severity==='high'?'r':'a'}">${a.severity==='high'?'緊急':'注意'}</span>
         </div></div>`).join('');
   } catch {}
@@ -2554,7 +2554,7 @@ async function _loadKbar(t){
     }).join(' ');
     var lc=r.last>=r.open?'#1a7a52':'#d63b3b';
     kb.innerHTML='<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">'+
-      '<span style="font-weight:600">'+t+' 分時（'+r.date+'）</span>'+
+      '<span style="font-weight:600">'+t+(r.name?' '+r.name:'')+' 分時（'+r.date+'）</span>'+
       '<span>開'+r.open+' 高'+r.high+' 低'+r.low+' <b style="color:'+lc+'">收'+r.last+'</b></span></div>'+
       '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'+
       '<polyline points="'+pts+'" fill="none" stroke="'+lc+'" stroke-width="1.6"/>'+
