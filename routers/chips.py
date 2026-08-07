@@ -184,7 +184,13 @@ async def kbar(ticker: str, date: str = ""):
                  "c": float(r.get("close", 0) or 0),
                  "v": float(r.get("volume", 0) or 0)} for r in rows]
         closes = [b["c"] for b in bars if b["c"] > 0]
-        return {"ticker": ticker, "date": use_date, "bars": bars,
+        nm = None
+        try:
+            from services.finmind import get_tw_stock_name
+            nm = await get_tw_stock_name(ticker)
+        except Exception:
+            pass
+        return {"ticker": ticker, "name": nm, "date": use_date, "bars": bars,
                 "open": closes[0] if closes else None,
                 "high": max(closes) if closes else None,
                 "low": min(closes) if closes else None,
