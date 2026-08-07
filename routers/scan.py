@@ -7,6 +7,34 @@ from services.line_notify import send_line_message
 
 router = APIRouter(prefix="/scan", tags=["scan"])
 
+
+async def resolve_tw_name(ticker: str, stored: str | None = None, db=None,
+                          user_id: str | None = None) -> str:
+    """名稱解析順序：持倉已存名稱 → 內建對照表 → FinMind TaiwanStockInfo。
+    查到新名稱時回寫 DB，之後所有頁面都會直接有中文名。"""
+    t = str(ticker).strip()
+    s = (stored or "").strip()
+    if s and s != t:
+        return s
+    name = TW_STOCK_LIST.get(t)
+    if not name:
+        try:
+            from services.finmind import get_tw_stock_name
+            name = await get_tw_stock_name(t)
+        except Exception:
+            name = None
+    if not name:
+        return t
+    if db is not None and user_id:
+        try:
+            await db.holdings.update_many(
+                {"user_id": user_id, "ticker": t}, {"$set": {"name": name}})
+            await db.watchlist.update_many(
+                {"user_id": user_id, "ticker": t}, {"$set": {"name": name}})
+        except Exception:
+            pass
+    return name
+
 # ── 台股完整名稱對照 ──
 TW_STOCK_LIST = {
     "2330":"台積電","2303":"聯電","5347":"世界先進","6770":"力積電",
@@ -198,9 +226,10 @@ async def check_alerts(user_id: str):
     line_messages = []
 
     async for h in db.holdings.find({"user_id": user_id}):
-        name   = h.get("name", h["ticker"])
         ticker = h["ticker"]
         market = h.get("market", "tw")
+        name   = (await resolve_tw_name(ticker, h.get("name"), db, user_id)
+                  if market == "tw" else h.get("name", ticker))
 
         # 台股用 FinMind 取完整技術指標（含MA5/MA10）
         if market == "tw":
@@ -221,7 +250,7 @@ async def check_alerts(user_id: str):
 
         # ── 停利停損 ──
         if pnl_pct > 0 and pullback >= pt:
-            msg = f"\U0001f534【停利警示】{ticker} {name}\n從最高點回檔 {pullback:.1f}%，已觸發停利條件\n現價 ${current}，損益 +{pnl_pct}%"
+            msg = f"[RED]【停利警示】{ticker} {name}\n從最高點回檔 {pullback:.1f}%，已觸發停利條件\n現價 ${current}，損益 +{pnl_pct}%"
             alerts.append({"type":"profit_alert","ticker":ticker,"name":name,
                            "message":f"從最高點回檔 {pullback:.1f}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high"})
             line_messages.append(msg)
@@ -229,7 +258,7 @@ async def check_alerts(user_id: str):
             alerts.append({"type":"profit_watch","ticker":ticker,"name":name,
                            "message":f"回檔 {pullback:.1f}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium"})
         elif pnl_pct <= -sl:
-            msg = f"\U0001f534【停損警示】{ticker} {name}\n虧損 {abs(pnl_pct):.1f}%，已觸發停損條件\n現價 ${current}"
+            msg = f"[RED]【停損警示】{ticker} {name}\n虧損 {abs(pnl_pct):.1f}%，已觸發停損條件\n現價 ${current}"
             alerts.append({"type":"loss_alert","ticker":ticker,"name":name,
                            "message":f"虧損 {abs(pnl_pct):.1f}%，已觸發停損條件","pnl_pct":pnl_pct,"severity":"high"})
             line_messages.append(msg)
@@ -256,19 +285,19 @@ async def check_alerts(user_id: str):
                 continue
             if abs(diff) <= 2:
                 direction = "站上" if diff >= 0 else "觸碰"
-                msg = f"\U0001f4ca【{label}觸碰】{ticker} {name}\n現價 ${current} {direction} {label}（{diff:+.1f}%）"
+                msg = f"[CHART]【{label}觸碰】{ticker} {name}\n現價 ${current} {direction} {label}（{diff:+.1f}%）"
                 alerts.append({"type": typename, "ticker": ticker, "name": name,
                                "message": f"觸碰{label}（{diff:+.1f}%）", "severity": "medium"})
                 line_messages.append(msg)
             elif diff < -2 and label in ("月線", "季線"):
-                msg = f"\U0001f7e1【跌破{label}】{ticker} {name}\n現價 ${current}，{label}（{diff:.1f}%）"
+                msg = f"[YELLOW]【跌破{label}】{ticker} {name}\n現價 ${current}，{label}（{diff:.1f}%）"
                 alerts.append({"type": "ma_alert", "ticker": ticker, "name": name,
                                "message": f"跌破{label}（{diff:.1f}%）", "severity": "high"})
                 line_messages.append(msg)
 
     # 批次發送 LINE
     if line_messages:
-        full_msg = "\u26a0\ufe0f TradeGuard 警示\n" + "─" * 20 + "\n" + "\n\n".join(line_messages)
+        full_msg = "[WARN] TradeGuard 警示\n" + "─" * 20 + "\n" + "\n\n".join(line_messages)
         await send_line_message(full_msg)
 
     return {"alerts": alerts, "checked_at": datetime.utcnow().isoformat()}
