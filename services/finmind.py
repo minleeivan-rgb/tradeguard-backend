@@ -30,6 +30,29 @@ async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: 
     return data.get("data", [])
 
 
+async def get_tw_stock_name(ticker: str) -> str | None:
+    """由 TaiwanStockInfo 精確取得中文名稱（共用 6 小時快取）"""
+    global _stock_info_cache
+    try:
+        now = time.time()
+        if _stock_info_cache["data"] is None or (now - _stock_info_cache["fetched_at"]) > _STOCK_INFO_TTL:
+            params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.get(FINMIND_BASE, params=params)
+            _stock_info_cache["data"] = r.json().get("data", [])
+            _stock_info_cache["fetched_at"] = now
+        t = str(ticker).strip()
+        for s in _stock_info_cache["data"] or []:
+            if str(s.get("stock_id", "")).strip() == t:
+                nm = str(s.get("stock_name", "")).strip()
+                if nm:
+                    return nm
+        return None
+    except Exception as e:
+        print(f"[FinMind] name lookup error: {e}")
+        return None
+
+
 async def search_tw_stock(q: str) -> list:
     """搜尋台股代號或名稱（快取 6 小時）"""
     global _stock_info_cache
