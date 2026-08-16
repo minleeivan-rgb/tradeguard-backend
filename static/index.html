@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html><!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
@@ -218,6 +218,8 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
       <button class="tab" onclick="go('watchlist')">觀察清單</button>
       <button class="tab" onclick="go('etf')">主動ETF</button>
       <button class="tab" onclick="go('chips')">籌碼</button>
+      <button class="tab" onclick="go('risk')">風險</button>
+      <button class="tab" onclick="go('lab')">驗證</button>
     </div>
   </div>
 
@@ -487,6 +489,73 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
 
     </div>
 
+    <!-- RISK -->
+    <div id="risk" class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">部位風險總覽</div>
+          <div style="font-size:12px;color:#aaa;margin-top:2px">整戶維持率、族群集中度、下跌壓力測試</div>
+        </div>
+        <button onclick="loadRisk()" style="padding:8px 16px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">刷新</button>
+      </div>
+      <div id="riskWarn"></div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">曝險概況</div>
+        <div id="riskSummary" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">點擊刷新載入</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">族群集中度</div>
+        <div id="riskSectors" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">—</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-title">下跌壓力測試</div>
+        <div id="riskStress" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">—</div></div>
+      </div>
+    </div>
+
+    <!-- LAB -->
+    <div id="lab" class="section">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:700">驗證實驗室</div>
+          <div style="font-size:12px;color:#aaa;margin-top:2px">紀律追蹤 · 進場訊號回測 · 出場規則比較</div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title">紀律追蹤</div>
+          <div style="display:flex;gap:6px">
+            <button onclick="updateDiscipline()" style="padding:6px 12px;background:#fff;border:1px solid #e5e5e0;border-radius:10px;font-size:12px;cursor:pointer">回填後續走勢</button>
+            <button onclick="loadDiscipline()" style="padding:6px 12px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">刷新</button>
+          </div>
+        </div>
+        <div id="discSummary" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">點擊刷新載入</div></div>
+        <div id="discList" style="margin-top:6px"></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px">
+          <div class="card-title">進場訊號回測</div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select id="btStrategy" style="padding:6px 10px;border:1px solid #e5e5e0;border-radius:10px;font-size:12px">
+              <option value="vol_quiet">爆量未大漲</option>
+              <option value="squeeze">均線糾結突破</option>
+              <option value="high60">60日新高</option>
+              <option value="ma20_cross">站上月線</option>
+            </select>
+            <button onclick="runBacktest()" style="padding:6px 12px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">執行</button>
+          </div>
+        </div>
+        <div id="btEntry" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">選策略後按執行（需先完成歷史回補）</div></div>
+      </div>
+      <div class="card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title">出場規則比較</div>
+          <button onclick="runExitTest()" style="padding:6px 12px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">執行</button>
+        </div>
+        <div id="btExit" style="margin-top:8px"><div style="color:#aaa;text-align:center;padding:12px">比較「移動停利」「破月線」「固定持有」三種規則</div></div>
+      </div>
+    </div>
+
     <!-- CHIPS -->
     <div id="chips" class="section">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -731,7 +800,7 @@ let API_BASE = window.location.hostname === 'localhost'
   ? 'http://localhost:8000' 
   : window.location.origin;
 let PROFIT_PCT = 20, LOSS_PCT = 7;
-const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist','etf','chips'];
+const tabIds = ['dashboard','scan','review','history','journal','settings','gooaye','market','watchlist','etf','chips','risk','lab'];
 
 // ==================== 規則常數 ====================
 const CAT_CONFIG = {
@@ -846,6 +915,8 @@ function go(t) {
   if(t === 'watchlist') loadWatchlist();
   if(t === 'etf') loadEtf();
   if(t === 'chips') loadChips();
+  if(t === 'risk') loadRisk();
+  if(t === 'lab') loadLab();
 }
 
 // ==================== 自訂規則 ====================
@@ -2560,6 +2631,180 @@ async function _loadKbar(t){
       '<polyline points="'+pts+'" fill="none" stroke="'+lc+'" stroke-width="1.6"/>'+
       '</svg>';
   }catch(e){kb.innerHTML='';}
+}
+
+
+// ==================== 風險總覽 ====================
+function _nt(n){return (n||0).toLocaleString();}
+
+async function loadRisk(){
+  if(typeof USER_ID==='undefined'||!USER_ID){alert('請先登入');return;}
+  var s=document.getElementById('riskSummary');
+  s.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/risk/overview/'+USER_ID+'?_='+Date.now()).then(x=>x.json());
+    if(r.error){s.innerHTML='<div style="color:#c97c0a;padding:10px;font-size:13px">'+r.error+'</div>';return;}
+
+    var w=document.getElementById('riskWarn');
+    w.innerHTML=(r.warnings&&r.warnings.length)?
+      '<div class="card" style="margin-bottom:10px;border-left:3px solid #d63b3b"><div style="font-size:13px;font-weight:700;color:#A32D2D;margin-bottom:5px">風險提醒</div>'+
+      r.warnings.map(function(x){return'<div style="font-size:12px;color:#666;line-height:1.7">• '+x+'</div>';}).join('')+'</div>':'';
+
+    var mc=r.margin_maintenance_pct==null?'#888':r.margin_maintenance_pct<130?'#d63b3b':r.margin_maintenance_pct<160?'#c97c0a':'#1a7a52';
+    var html='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px">'+
+      '<div style="flex:1;min-width:120px"><div style="font-size:11px;color:#888">總市值</div><div style="font-size:18px;font-weight:700">$'+_nt(r.total_market_value)+'</div></div>'+
+      '<div style="flex:1;min-width:120px"><div style="font-size:11px;color:#888">自有資金</div><div style="font-size:18px;font-weight:700">$'+_nt(r.total_equity)+'</div></div>'+
+      '<div style="flex:1;min-width:120px"><div style="font-size:11px;color:#888">融資借款</div><div style="font-size:18px;font-weight:700;color:#c97c0a">$'+_nt(r.total_loan)+'</div></div>'+
+      '<div style="flex:1;min-width:100px"><div style="font-size:11px;color:#888">總槓桿</div><div style="font-size:18px;font-weight:700">'+(r.leverage||'—')+'x</div></div>'+
+      '<div style="flex:1;min-width:120px"><div style="font-size:11px;color:#888">整戶維持率</div><div style="font-size:18px;font-weight:700;color:'+mc+'">'+(r.margin_maintenance_pct!=null?r.margin_maintenance_pct+'%':'—')+'</div></div>'+
+      '<div style="flex:1;min-width:130px"><div style="font-size:11px;color:#888">距追繳緩衝</div><div style="font-size:18px;font-weight:700;color:'+mc+'">'+(r.buffer_to_call_pct!=null?'還可跌 '+r.buffer_to_call_pct+'%':'—')+'</div></div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:#b5b5ae;line-height:1.6;margin-bottom:8px">'+(r.maintenance_note||'')+'</div>';
+
+    html+=(r.holdings||[]).map(function(x){
+      var pc=x.pnl_pct>=0?'#1a7a52':'#d63b3b';
+      return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f8f8f5">'+
+        '<div><span style="font-weight:600;font-size:13px">'+x.ticker+' '+x.name+'</span>'+
+        (x.margin?'<span style="font-size:10px;background:#FAEEDA;color:#854F0B;padding:1px 6px;border-radius:5px;margin-left:5px">融資</span>':'')+
+        '<span style="font-size:10px;color:#b5b5ae;margin-left:5px">'+(x.price_time||'')+'</span></div>'+
+        '<div style="text-align:right"><span style="font-size:13px;font-weight:600">$'+_nt(x.market_value)+'</span>'+
+        '<span style="color:'+pc+';font-size:12px;margin-left:8px">'+(x.pnl_pct>0?'+':'')+x.pnl_pct+'%</span></div></div>';
+    }).join('');
+    s.innerHTML=html;
+
+    var se=document.getElementById('riskSectors');
+    se.innerHTML=(r.sectors||[]).map(function(x){
+      var col=x.level==='danger'?'#d63b3b':x.level==='warn'?'#c97c0a':'#1a7a52';
+      return'<div style="padding:6px 0;border-bottom:1px solid #f8f8f5">'+
+        '<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:600">'+x.sector+'</span>'+
+        '<span style="font-weight:700;color:'+col+'">'+x.pct+'%</span></div>'+
+        '<div style="height:5px;background:#f0f0ec;border-radius:3px;margin-top:3px"><div style="height:5px;width:'+Math.min(x.pct,100)+'%;background:'+col+';border-radius:3px"></div></div>'+
+        '<div style="font-size:10px;color:#aaa;margin-top:2px">'+(x.tickers||[]).join('、')+'</div></div>';
+    }).join('')||'<div style="color:#aaa;padding:10px">—</div>';
+
+    var st=document.getElementById('riskStress');
+    st.innerHTML='<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">'+(r.stress_note||'')+'</div>'+
+      (r.stress_test||[]).map(function(x){
+        var col=x.status==='斷頭風險'?'#d63b3b':x.status==='追繳'?'#d63b3b':x.status==='警戒'?'#c97c0a':'#1a7a52';
+        var names=(x.stocks_below_130||[]).map(function(b){return b.ticker+' '+b.name+'('+b.maint+'%)';}).join('、');
+        return'<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f8f8f5">'+
+          '<div style="min-width:0"><span style="font-weight:600;font-size:13px">大盤 '+x.index_change_pct+'%</span>'+
+          (names?'<div style="font-size:10px;color:#d63b3b;margin-top:2px">先追繳：'+names+'</div>':'')+'</div>'+
+          '<div style="text-align:right;flex-shrink:0"><div style="font-size:13px;font-weight:700;color:'+col+'">'+(x.maintenance_pct!=null?x.maintenance_pct+'%':'—')+' <span style="font-size:11px">'+x.status+'</span></div>'+
+          '<div style="font-size:10px;color:#888">淨值 $'+_nt(x.equity)+'</div></div></div>';
+      }).join('');
+  }catch(e){s.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+// ==================== 驗證實驗室 ====================
+
+function loadLab(){ loadDiscipline(); }
+
+async function loadDiscipline(){
+  if(typeof USER_ID==='undefined'||!USER_ID){alert('請先登入');return;}
+  var s=document.getElementById('discSummary'),l=document.getElementById('discList');
+  s.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">載入中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/discipline/'+USER_ID+'?_='+Date.now()).then(x=>x.json());
+    var sm=r.summary||{};
+    var html='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px">'+
+      '<div><div style="font-size:11px;color:#888">警示總數</div><div style="font-size:17px;font-weight:700">'+(sm.total||0)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">已處理</div><div style="font-size:17px;font-weight:700;color:#1a7a52">'+(sm.acted||0)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">未處理</div><div style="font-size:17px;font-weight:700;color:#d63b3b">'+(sm.ignored||0)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">待標記</div><div style="font-size:17px;font-weight:700;color:#888">'+(sm.pending||0)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">執行率</div><div style="font-size:17px;font-weight:700">'+(sm.follow_rate_pct!=null?sm.follow_rate_pct+'%':'—')+'</div></div></div>';
+    var st=r.stats||{};
+    var rows=[5,10,20].map(function(h){
+      var d=st['d'+h]||{};
+      if(d.acted_avg_change_pct==null&&d.ignored_avg_change_pct==null)return'';
+      function cell(v,n){return v==null?'<span style="color:#aaa">—</span>':'<span style="color:'+(v>=0?'#1a7a52':'#d63b3b')+';font-weight:600">'+(v>0?'+':'')+v+'%</span><span style="font-size:10px;color:#aaa">('+n+')</span>';}
+      return'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f8f8f5;font-size:12px">'+
+        '<span>警示後 '+h+' 日</span><span>已處理 '+cell(d.acted_avg_change_pct,d.acted_n)+'　未處理 '+cell(d.ignored_avg_change_pct,d.ignored_n)+'</span></div>';
+    }).join('');
+    if(rows)html+='<div style="margin-top:6px">'+rows+'</div>';
+    if(r.insight)html+='<div style="font-size:12px;color:#854F0B;background:#FAEEDA;padding:8px 10px;border-radius:8px;margin-top:8px;line-height:1.6">'+r.insight+'</div>';
+    html+='<div style="font-size:11px;color:#b5b5ae;margin-top:6px">'+(r.note||'')+'</div>';
+    s.innerHTML=html;
+
+    l.innerHTML=(r.items||[]).slice(0,25).map(function(x){
+      var f=x.followup||{},d10=f.d10?f.d10.change_pct:null;
+      var ac=x.action==='acted'?'#1a7a52':x.action==='ignored'?'#d63b3b':'#888';
+      var al=x.action==='acted'?'已處理':x.action==='ignored'?'未處理':'待標記';
+      return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f8f8f5">'+
+        '<div style="min-width:0"><div style="font-size:12px"><span style="font-weight:600">'+x.ticker+' '+x.name+'</span>'+
+        '<span style="color:#888;margin-left:6px">'+x.message+'</span></div>'+
+        '<div style="font-size:10px;color:#aaa">'+x.alert_date+' @$'+x.alert_price+
+        (d10!=null?'　10日後 <span style="color:'+(d10>=0?'#1a7a52':'#d63b3b')+'">'+(d10>0?'+':'')+d10+'%</span>':'')+'</div></div>'+
+        '<div style="display:flex;gap:4px;flex-shrink:0;align-items:center">'+
+        '<span style="font-size:10px;color:'+ac+'">'+al+'</span>'+
+        '<button onclick="markDisc(\''+x.id+'\',\'acted\')" style="padding:2px 7px;background:#fff;border:1px solid #cfe5db;color:#1a7a52;border-radius:7px;font-size:10px;cursor:pointer">已處理</button>'+
+        '<button onclick="markDisc(\''+x.id+'\',\'ignored\')" style="padding:2px 7px;background:#fff;border:1px solid #f0d5d5;color:#d63b3b;border-radius:7px;font-size:10px;cursor:pointer">沒動作</button></div></div>';
+    }).join('');
+  }catch(e){s.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+async function markDisc(id,act){
+  await fetch(API_BASE+'/discipline/'+encodeURIComponent(id)+'/action',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({action:act,note:''})});
+  loadDiscipline();
+}
+
+async function updateDiscipline(){
+  var s=document.getElementById('discSummary');
+  s.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">回填中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/discipline/update/'+USER_ID+'?_='+Date.now()).then(x=>x.json());
+    if(r.note&&!r.updated)alert(r.note);
+  }catch(e){}
+  loadDiscipline();
+}
+
+async function runBacktest(){
+  var st=document.getElementById('btStrategy').value;
+  var el=document.getElementById('btEntry');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">回測中（約10-30秒）...</div>';
+  try{
+    var r=await fetch(API_BASE+'/backtest/entry?strategy='+st+'&_='+Date.now()).then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;padding:10px;font-size:13px">'+r.error+'</div>';return;}
+    var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">期間 '+r.period+'　訊號 '+r.trades+' 筆　已扣交易成本 '+r.cost_assumption_pct+'%</div>';
+    html+=[5,10,20].map(function(h){
+      var d=(r.results||{})['d'+h]||{},bm=(r.baseline_market_avg||{})['d'+h];
+      if(d.note)return'<div style="font-size:12px;color:#aaa;padding:4px 0">'+h+'日：'+d.note+'（n='+d.n+'）</div>';
+      var ec=d.edge_vs_market_pct>0.5?'#1a7a52':d.edge_vs_market_pct>-0.5?'#c97c0a':'#d63b3b';
+      return'<div style="padding:7px 0;border-bottom:1px solid #f8f8f5">'+
+        '<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:700">持有 '+h+' 日</span>'+
+        '<span style="color:'+ec+';font-weight:700">'+d.verdict+'</span></div>'+
+        '<div style="font-size:12px;color:#666;margin-top:3px;line-height:1.7">勝率 '+d.win_rate_pct+'%　平均 '+(d.avg_return_pct>0?'+':'')+d.avg_return_pct+'%　中位數 '+(d.median_return_pct>0?'+':'')+d.median_return_pct+'%　n='+d.n+'<br>'+
+        '大盤同期 '+(bm>0?'+':'')+bm+'%　→ <b style="color:'+ec+'">超額 '+(d.edge_vs_market_pct>0?'+':'')+d.edge_vs_market_pct+'%</b>　'+
+        '平均賺 '+d.avg_win_pct+'% / 平均賠 '+d.avg_loss_pct+'%</div></div>';
+    }).join('');
+    html+='<div style="font-size:11px;color:#A32D2D;background:#FCEBEB;padding:7px 10px;border-radius:8px;margin-top:8px;line-height:1.6">'+r.warning+'</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+async function runExitTest(){
+  var st=document.getElementById('btStrategy').value;
+  var el=document.getElementById('btExit');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">回測中（約10-30秒）...</div>';
+  try{
+    var r=await fetch(API_BASE+'/backtest/exit?strategy='+st+'&_='+Date.now()).then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;padding:10px;font-size:13px">'+r.error+'</div>';return;}
+    var html='<div style="font-size:11px;color:#b5b5ae;margin-bottom:6px">進場訊號：'+r.strategy+'　'+r.entries+' 筆　期間 '+r.period+'</div>';
+    var res=r.results||{};
+    html+=Object.keys(res).map(function(k){
+      var d=res[k];
+      if(d.note)return'<div style="font-size:12px;color:#aaa;padding:4px 0">'+k+'：'+d.note+'</div>';
+      var isBest=(k===r.best_by_avg_return);
+      var col=d.avg_return_pct>=0?'#1a7a52':'#d63b3b';
+      return'<div style="padding:7px 0;border-bottom:1px solid #f8f8f5;'+(isBest?'background:#F5FAF8;border-radius:8px;padding-left:8px;padding-right:8px':'')+'">'+
+        '<div style="display:flex;justify-content:space-between;font-size:13px"><span style="font-weight:700">'+k+(isBest?' ★':'')+'</span>'+
+        '<span style="color:'+col+';font-weight:700">平均 '+(d.avg_return_pct>0?'+':'')+d.avg_return_pct+'%</span></div>'+
+        '<div style="font-size:12px;color:#666;margin-top:3px;line-height:1.7">勝率 '+d.win_rate_pct+'%　平均持有 '+d.avg_hold_days+' 日　最大單筆虧損 '+d.worst_trade_pct+'%　最大回撤 '+d.max_drawdown_pct+'%</div></div>';
+    }).join('');
+    html+='<div style="font-size:11px;color:#A32D2D;background:#FCEBEB;padding:7px 10px;border-radius:8px;margin-top:8px;line-height:1.6">'+r.warning+'</div>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
 }
 
 </script>
