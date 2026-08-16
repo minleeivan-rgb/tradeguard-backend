@@ -252,15 +252,15 @@ async def check_alerts(user_id: str):
         if pnl_pct > 0 and pullback >= pt:
             msg = f"[RED]【停利警示】{ticker} {name}\n從最高點回檔 {pullback:.1f}%，已觸發停利條件\n現價 ${current}，損益 +{pnl_pct}%"
             alerts.append({"type":"profit_alert","ticker":ticker,"name":name,
-                           "message":f"從最高點回檔 {pullback:.1f}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high"})
+                           "message":f"從最高點回檔 {pullback:.1f}%，已觸發停利條件","pnl_pct":pnl_pct,"severity":"high","current_price":current})
             line_messages.append(msg)
         elif pnl_pct > 0 and pullback >= pt * 0.8:
             alerts.append({"type":"profit_watch","ticker":ticker,"name":name,
-                           "message":f"回檔 {pullback:.1f}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium"})
+                           "message":f"回檔 {pullback:.1f}%，接近 {pt}% 停利觸發線","pnl_pct":pnl_pct,"severity":"medium","current_price":current})
         elif pnl_pct <= -sl:
             msg = f"[RED]【停損警示】{ticker} {name}\n虧損 {abs(pnl_pct):.1f}%，已觸發停損條件\n現價 ${current}"
             alerts.append({"type":"loss_alert","ticker":ticker,"name":name,
-                           "message":f"虧損 {abs(pnl_pct):.1f}%，已觸發停損條件","pnl_pct":pnl_pct,"severity":"high"})
+                           "message":f"虧損 {abs(pnl_pct):.1f}%，已觸發停損條件","pnl_pct":pnl_pct,"severity":"high","current_price":current})
             line_messages.append(msg)
 
         # ── 均線警示（含 MA5/MA10，正確顯示正負號）──
@@ -287,12 +287,12 @@ async def check_alerts(user_id: str):
                 direction = "站上" if diff >= 0 else "觸碰"
                 msg = f"[CHART]【{label}觸碰】{ticker} {name}\n現價 ${current} {direction} {label}（{diff:+.1f}%）"
                 alerts.append({"type": typename, "ticker": ticker, "name": name,
-                               "message": f"觸碰{label}（{diff:+.1f}%）", "severity": "medium"})
+                               "message": f"觸碰{label}（{diff:+.1f}%）", "severity": "medium", "current_price": current})
                 line_messages.append(msg)
             elif diff < -2 and label in ("月線", "季線"):
                 msg = f"[YELLOW]【跌破{label}】{ticker} {name}\n現價 ${current}，{label}（{diff:.1f}%）"
                 alerts.append({"type": "ma_alert", "ticker": ticker, "name": name,
-                               "message": f"跌破{label}（{diff:.1f}%）", "severity": "high"})
+                               "message": f"跌破{label}（{diff:.1f}%）", "severity": "high", "current_price": current})
                 line_messages.append(msg)
 
     # 批次發送 LINE
@@ -300,4 +300,14 @@ async def check_alerts(user_id: str):
         full_msg = "[WARN] TradeGuard 警示\n" + "─" * 20 + "\n" + "\n\n".join(line_messages)
         await send_line_message(full_msg)
 
-    return {"alerts": alerts, "checked_at": datetime.utcnow().isoformat()}
+    # 紀律追蹤：記錄警示當下價格，供日後比對「有處理 vs 沒處理」
+    logged = 0
+    try:
+        from routers.discipline import log_alerts
+        logged = await log_alerts(user_id, alerts,
+                                  {a["ticker"]: a.get("current_price") for a in alerts})
+    except Exception as e:
+        print(f"[scan] discipline log: {e}")
+
+    return {"alerts": alerts, "discipline_logged": logged,
+            "checked_at": datetime.utcnow().isoformat()}
