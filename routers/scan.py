@@ -274,6 +274,9 @@ async def check_alerts(user_id: str):
             if not mav: return None
             return round((price - mav) / mav * 100, 2)
 
+        basis_txt = (f'{tech.get("price_basis", "")} · 均線基準:{tech.get("ma_basis", "")}'
+                     if market == "tw" else "收盤價")
+
         for label, mav, typename in [
             ("5日線",  ma5,  "ma5_touch"),
             ("10日線", ma10, "ma10_touch"),
@@ -285,14 +288,20 @@ async def check_alerts(user_id: str):
                 continue
             if abs(diff) <= 2:
                 direction = "站上" if diff >= 0 else "觸碰"
-                msg = f"[CHART]【{label}觸碰】{ticker} {name}\n現價 ${current} {direction} {label}（{diff:+.1f}%）"
+                msg = (f"[CHART]【{label}觸碰】{ticker} {name}\n"
+                       f"現價 ${current} {direction} {label} ${mav}（{diff:+.1f}%）\n{basis_txt}")
                 alerts.append({"type": typename, "ticker": ticker, "name": name,
-                               "message": f"觸碰{label}（{diff:+.1f}%）", "severity": "medium", "current_price": current})
+                               "message": f"觸碰{label} ${mav}（{diff:+.1f}%）",
+                               "severity": "medium", "current_price": current,
+                               "ma_value": mav, "basis": basis_txt})
                 line_messages.append(msg)
             elif diff < -2 and label in ("月線", "季線"):
-                msg = f"[YELLOW]【跌破{label}】{ticker} {name}\n現價 ${current}，{label}（{diff:.1f}%）"
+                msg = (f"[YELLOW]【跌破{label}】{ticker} {name}\n"
+                       f"現價 ${current}，{label} ${mav}（{diff:.1f}%）\n{basis_txt}")
                 alerts.append({"type": "ma_alert", "ticker": ticker, "name": name,
-                               "message": f"跌破{label}（{diff:.1f}%）", "severity": "high", "current_price": current})
+                               "message": f"跌破{label} ${mav}（{diff:.1f}%）",
+                               "severity": "high", "current_price": current,
+                               "ma_value": mav, "basis": basis_txt})
                 line_messages.append(msg)
 
     # 批次發送 LINE
