@@ -87,8 +87,9 @@ async def _scan_one_stock(uid: str, ticker: str, name: str, market: str,
             _mark(aid)
 
     # 觀察股「啟動」：盤中相對前收大漲
-    if not is_holding and market == "tw" and rt and fin_close:
-        day_chg = round((current - fin_close) / fin_close * 100, 2)
+    if not is_holding and market == "tw" and rt:
+        base = tech.get("prev_close") or fin_close
+        day_chg = round((current - base) / base * 100, 2) if base else 0
         if day_chg >= 4:
             aid = f"{uid}_{ticker}_launch"
             if not _on_cooldown(aid):
