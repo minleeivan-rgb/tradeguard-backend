@@ -378,3 +378,52 @@ async def audit_full():
                "INFO": sum(1 for x in R if x["verdict"] == "INFO")}
     return {"summary": summary, "checks": R,
             "generated_at": datetime.now(TW_TZ).isoformat()}
+
+@router.get("/ma/{ticker}")
+async def ma_verify(ticker: str):
+    """均線對帳：把原始收盤逐日攤開，兩種算法並列，直接跟券商畫面比"""
+    from services.finmind import get_tw_stock_price
+    from services.yfinance_service import get_tw_realtime_price
+    try:
+        data = await get_tw_stock_price(ticker)
+        if not data:
+            return {"error": "無日線資料"}
+        rows = data["raw_rows"]
+        closes = [float(r["close"]) for r in rows]
+        dates  = [str(r.get("date", "")) for r in rows]
+        last_date = dates[-1]
+        tw_today = (datetime.now(TW_TZ)).strftime("%Y-%m-%d")
+
+        rt = await get_tw_realtime_price(ticker)
+        live = float(rt["current_price"]) if rt and rt.get("current_price") else None
+
+        def ma(series, n):
+            return round(sum(series[-n:]) / n, 2) if len(series) >= n else None
+
+        excl = {f"ma{n}": ma(closes, n) for n in (5, 10, 20, 60)}
+
+        if live:
+            series = closes[:-1] + [live] if last_date == tw_today else closes + [live]
+            incl = {f"ma{n}": ma(series, n) for n in (5, 10, 20, 60)}
+        else:
+            incl = None
+
+        return {
+            "ticker": ticker,
+            "last_close_date": last_date,
+            "tw_today": tw_today,
+            "daily_includes_today": last_date == tw_today,
+            "live_price": live,
+            "live_source": rt.get("source") if rt else None,
+            "live_time": rt.get("price_time") if rt else None,
+            "recent_closes": [{"date": d, "close": c}
+                              for d, c in zip(dates[-6:], closes[-6:])],
+            "ma_excluding_today": excl,
+            "ma_including_live": incl,
+            "system_uses": "ma_including_live（與券商一致）" if incl else "ma_excluding_today（無即時價）",
+            "note": "券商盤中的均線把當下價格算作今日這一點；若兩者仍有差距，"
+                    "先看 recent_closes 的日期是否連續、是否缺交易日。",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
