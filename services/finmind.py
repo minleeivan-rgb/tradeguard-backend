@@ -115,8 +115,11 @@ async def get_tw_stock_price(stock_id: str) -> dict:
         return None
 
 
-async def get_tw_technical(stock_id: str) -> dict:
-    """用 FinMind 計算台股完整技術指標（含 MA10）"""
+async def get_tw_technical(stock_id: str, live_price: float | None = None,
+                           use_live: bool = True) -> dict:
+    """台股技術指標。
+    use_live=True（預設）：盤中把「即時價」當作今日這一個點併入序列後再算均線，
+    與券商看盤軟體的顯示方式一致。回測/掃描歷史請傳 use_live=False。"""
     import pandas as pd
     try:
         data = await get_tw_stock_price(stock_id)
@@ -128,6 +131,38 @@ async def get_tw_technical(stock_id: str) -> dict:
         highs  = pd.Series([float(r["max"]) for r in rows])
         lows   = pd.Series([float(r["min"]) for r in rows])
         vols   = pd.Series([float(r.get("Trading_Volume", 0)) for r in rows])
+
+        last_date  = str(rows[-1].get("date", ""))
+        prev_close = float(closes.iloc[-1])          # 最後一個「已收盤」日的收盤價
+        tw_today   = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d")
+
+        live = live_price
+        if use_live and live is None:
+            try:
+                from services.yfinance_service import get_tw_realtime_price
+                rt = await get_tw_realtime_price(stock_id)
+                if rt and rt.get("current_price"):
+                    live = float(rt["current_price"])
+            except Exception:
+                live = None
+
+        ma_basis   = f"{last_date} 收盤"
+        price_note = "收盤價"
+        if use_live and live and live > 0:
+            if last_date == tw_today:
+                # 日線已含今日 → 以即時價覆蓋今日這一點
+                closes.iloc[-1] = live
+                highs.iloc[-1]  = max(float(highs.iloc[-1]), live)
+                lows.iloc[-1]   = min(float(lows.iloc[-1]), live)
+                prev_close = float(closes.iloc[-2])
+            else:
+                # 日線只到前一交易日 → 追加今日這一點
+                closes = pd.concat([closes, pd.Series([live])], ignore_index=True)
+                highs  = pd.concat([highs,  pd.Series([live])], ignore_index=True)
+                lows   = pd.concat([lows,   pd.Series([live])], ignore_index=True)
+            ma_basis   = f"{last_date} 收盤 + 今日即時價（{live}）"
+            price_note = "盤中即時"
+
         current = float(closes.iloc[-1])
 
         # MA
@@ -179,6 +214,7 @@ async def get_tw_technical(stock_id: str) -> dict:
         vol_today = float(vols.iloc[-1])
         vol_ma20  = float(vols.tail(20).mean())
         vol_ratio = round(vol_today / vol_ma20, 2) if vol_ma20 > 0 else 1.0
+        vol_basis = f"{last_date} 收盤量"
 
         # Signals
         bull, bear = [], []
@@ -212,8 +248,13 @@ async def get_tw_technical(stock_id: str) -> dict:
             "macd": {"macd": macd_val, "signal": signal_val, "histogram": hist_val,
                      "bullish": macd_val > signal_val, "expanding": hist_val > hist_prev > 0},
             "bollinger": {"upper": bb_upper, "mid": round(float(bb_mid), 2), "lower": bb_lower, "pct": bb_pct},
-            "volume": {"ratio": vol_ratio, "surge": vol_ratio > 1.5},
+            "volume": {"ratio": vol_ratio, "surge": vol_ratio > 1.5, "basis": vol_basis},
             "bull_signals": bull, "bear_signals": bear, "direction": direction,
+            "prev_close": round(prev_close, 2),
+            "day_change_pct": round((current - prev_close) / prev_close * 100, 2) if prev_close else 0,
+            "last_close_date": last_date,
+            "ma_basis": ma_basis,
+            "price_basis": price_note,
         }
     except Exception as e:
         print(f"[FinMind] technical error {stock_id}: {e}")
