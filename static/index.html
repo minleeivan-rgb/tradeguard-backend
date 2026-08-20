@@ -513,6 +513,7 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
           <div style="display:flex;gap:6px;align-items:center">
             <input id="stbTicker" placeholder="單檔查詢，如 2327" style="padding:6px 10px;border:1px solid #e5e5e0;border-radius:10px;font-size:12px;width:130px">
             <button onclick="loadStability()" style="padding:6px 12px;background:#141413;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">查詢</button>
+            <button onclick="loadHolders()" style="padding:6px 12px;background:#fff;border:1px solid #e5e5e0;border-radius:10px;font-size:12px;cursor:pointer">股東人數</button>
             <button onclick="loadStabilityBatch()" style="padding:6px 12px;background:#1a7a52;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">掃全持倉</button>
           </div>
         </div>
@@ -581,7 +582,9 @@ hr{border:none;border-top:1px solid #f0f0ec;margin:12px 0}
           <div class="card-title" style="flex-shrink:0">個股分點 / 分K</div>
           <input id="chipTicker" placeholder="代號，如 2327" style="flex:1;padding:8px 12px;border:1px solid #e5e5e0;border-radius:10px;font-size:14px">
           <button onclick="loadBranch()" style="padding:8px 14px;background:#141413;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">查詢</button>
+          <button onclick="loadMarginCost()" style="padding:8px 14px;background:#fff;border:1px solid #e5e5e0;border-radius:10px;font-size:13px;cursor:pointer">融資成本</button>
         </div>
+        <div id="chipMarginCost" style="margin-top:10px"></div>
         <div id="chipKbar" style="margin-top:10px"></div>
         <div id="chipBranch" style="margin-top:6px"><div style="color:#aaa;text-align:center;padding:10px;font-size:13px">輸入代號查分點主力與分時走勢</div></div>
       </div>
@@ -2877,6 +2880,121 @@ async function loadStabilityBatch(){
           ((x.weakest_links||[]).length?'<div style="font-size:11px;color:#A32D2D;margin-top:3px;line-height:1.6">最弱項：'+x.weakest_links.map(function(w){return w.consequence;}).join('；')+'</div>':'')+
           '</div>';
       }).join('');
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+
+// ==================== 股東人數與級距分布 ====================
+async function loadHolders(){
+  var t=document.getElementById('stbTicker').value.trim();
+  if(!t){alert('請先輸入代號');return;}
+  var el=document.getElementById('riskStability');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:12px">查詢集保股權分散表...</div>';
+  try{
+    var r=await fetch(API_BASE+'/stability/holders/'+t+'?_='+Date.now()).then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;padding:10px;font-size:13px">'+r.error+'</div>';return;}
+    function sign(v,unit){if(v==null)return'<span style="color:#aaa">—</span>';var c=v>=0?'#1a7a52':'#d63b3b';return'<span style="color:'+c+'">'+(v>0?'+':'')+v+(unit||'%')+'</span>';}
+    var vcol=r.verdict==='籌碼集中中'?'#1a7a52':r.verdict==='無明顯方向'?'#5F5E5A':'#d63b3b';
+
+    var html='<div style="font-size:13px;font-weight:700;margin-bottom:2px">'+r.ticker+' '+r.name+
+      ' <span style="font-size:12px;font-weight:400;color:'+vcol+'">'+r.verdict+'</span></div>'+
+      '<div style="font-size:11px;color:#b5b5ae;margin-bottom:8px">集保資料日 '+r.data_date+'（週資料，涵蓋 '+r.weeks_covered+' 週）</div>';
+
+    html+='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:10px">'+
+      '<div><div style="font-size:11px;color:#888">股東總人數</div><div style="font-size:17px;font-weight:700">'+(r.holders||0).toLocaleString()+'</div>'+
+      '<div style="font-size:11px">週變 '+sign(r.holders_change_wow_pct)+'　期間 '+sign(r.holders_change_period_pct)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">平均每人持股</div><div style="font-size:17px;font-weight:700">'+(r.avg_lots_per_holder||'—')+' 張</div>'+
+      '<div style="font-size:11px">期間 '+sign(r.avg_lots_change_period_pct)+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">400張以上佔比</div><div style="font-size:17px;font-weight:700">'+r.big_400_pct+'%</div>'+
+      '<div style="font-size:11px">期間 '+sign(r.big_400_delta,'pp')+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">千張大戶</div><div style="font-size:17px;font-weight:700">'+r.whale_1000_people+' 人</div>'+
+      '<div style="font-size:11px">持 '+r.whale_1000_pct+'%　'+sign(r.whale_1000_delta,'pp')+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">5張以下人數佔比</div><div style="font-size:17px;font-weight:700">'+(r.retail_people_pct!=null?r.retail_people_pct+'%':'—')+'</div></div></div>';
+
+    html+='<div style="font-size:12px;color:#666;line-height:1.7;background:#F7F7F5;padding:8px 10px;border-radius:8px;margin-bottom:10px">→ '+r.what_this_means+'</div>';
+
+    var s=r.series||[];
+    if(s.length>1){
+      var hs=s.map(function(x){return x.holders;}),mx=Math.max.apply(null,hs),mn=Math.min.apply(null,hs),rg=(mx-mn)||1;
+      html+='<div style="font-size:12px;font-weight:600;margin-bottom:4px">股東人數趨勢</div>'+
+        s.slice(-10).map(function(x){
+          var w=Math.round((x.holders-mn)/rg*70+25);
+          return'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'+
+            '<span style="font-size:10px;color:#aaa;width:52px;flex-shrink:0">'+x.date.slice(5)+'</span>'+
+            '<div style="flex:1;height:6px;background:#f0f0ec;border-radius:3px"><div style="height:6px;width:'+w+'%;background:#1a7a52;border-radius:3px"></div></div>'+
+            '<span style="font-size:11px;color:#666;width:66px;text-align:right">'+x.holders.toLocaleString()+'</span>'+
+            '<span style="font-size:10px;color:#aaa;width:46px;text-align:right">'+(x.avg_lots_per_holder||'—')+'張</span></div>';
+        }).join('');
+    }
+
+    var ld=r.level_distribution||[];
+    if(ld.length){
+      html+='<div style="font-size:12px;font-weight:600;margin:10px 0 4px">持股級距分布（最新一期）</div>'+
+        ld.map(function(x){
+          return'<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f8f8f5;font-size:12px">'+
+            '<span style="color:#666">'+x.level+'</span>'+
+            '<span><span style="color:#888">'+Math.round(x.people).toLocaleString()+' 人</span>'+
+            '<b style="margin-left:10px">'+x.pct+'%</b></span></div>';
+        }).join('');
+    }
+
+    if(r.limitations){
+      html+='<div style="font-size:11px;color:#854F0B;background:#FAEEDA;padding:7px 10px;border-radius:8px;margin-top:8px;line-height:1.7">'+
+        r.limitations.map(function(x){return'• '+x;}).join('<br>')+'</div>';
+    }
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
+}
+
+
+// ==================== 融資戶平均成本 ====================
+async function loadMarginCost(){
+  var t=document.getElementById('chipTicker').value.trim();
+  if(!t){alert('請輸入代號');return;}
+  var el=document.getElementById('chipMarginCost');
+  el.innerHTML='<div style="color:#aaa;text-align:center;padding:10px;font-size:13px">推估融資成本中...</div>';
+  try{
+    var r=await fetch(API_BASE+'/chips/margin-cost/'+t+'?_='+Date.now()).then(x=>x.json());
+    if(r.error){el.innerHTML='<div style="color:#c97c0a;padding:10px;font-size:13px">'+r.error+'</div>';return;}
+    var pc=r.margin_holder_pnl_pct>=0?'#1a7a52':'#d63b3b';
+    var mc=r.avg_maintenance_pct==null?'#888':r.avg_maintenance_pct<130?'#d63b3b':r.avg_maintenance_pct<160?'#c97c0a':'#1a7a52';
+
+    var html='<div style="font-size:13px;font-weight:700;margin-bottom:2px">'+r.ticker+' '+r.name+' 融資戶成本推估</div>'+
+      '<div style="font-size:11px;color:#b5b5ae;margin-bottom:8px">資料 '+r.data_date+'　區間 '+r.window+'（'+r.window_days+' 個交易日）</div>';
+
+    html+='<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:8px">'+
+      '<div><div style="font-size:11px;color:#888">推估平均成本</div><div style="font-size:19px;font-weight:800">$'+r.avg_cost_est+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">現價</div><div style="font-size:19px;font-weight:800">$'+r.current_price+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">融資戶平均損益</div><div style="font-size:19px;font-weight:800;color:'+pc+'">'+(r.margin_holder_pnl_pct>0?'+':'')+r.margin_holder_pnl_pct+'%</div></div>'+
+      '<div><div style="font-size:11px;color:#888">平均維持率</div><div style="font-size:19px;font-weight:800;color:'+mc+'">'+(r.avg_maintenance_pct!=null?r.avg_maintenance_pct+'%':'—')+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">推估追繳價</div><div style="font-size:19px;font-weight:800;color:'+mc+'">$'+r.call_price_est+'</div>'+
+      '<div style="font-size:11px;color:#888">距現價 '+(r.distance_to_call_pct!=null?r.distance_to_call_pct+'%':'—')+'</div></div>'+
+      '<div><div style="font-size:11px;color:#888">融資餘額</div><div style="font-size:19px;font-weight:800">'+(r.balance_lots||0).toLocaleString()+'張</div>'+
+      (r.balance_change_5d_lots!=null?'<div style="font-size:11px;color:'+(r.balance_change_5d_lots>=0?"#d63b3b":"#1a7a52")+'">5日 '+(r.balance_change_5d_lots>0?'+':'')+r.balance_change_5d_lots.toLocaleString()+'</div>':'')+'</div></div>';
+
+    html+='<div style="font-size:12px;color:#666;line-height:1.7;background:#F7F7F5;padding:8px 10px;border-radius:8px;margin-bottom:8px">→ '+r.what_this_means+'</div>';
+
+    var ic=r.identity_check||{};
+    html+='<div style="font-size:11px;color:'+(ic.verdict==='PASS'?'#1a7a52':'#d63b3b')+';margin-bottom:4px">資料驗證：'+ic.formula+' → '+ic.verdict+'（'+ic.rows+' 日）　推估可信度：'+r.reliability+'</div>';
+
+    var h=r.history||[];
+    if(h.length>3){
+      var costs=h.map(function(x){return x.avg_cost;}),vw=h.map(function(x){return x.vwap;});
+      var all=costs.concat(vw),mx=Math.max.apply(null,all),mn=Math.min.apply(null,all),rg=(mx-mn)||1;
+      var W=640,H=90;
+      function line(arr,col){
+        var pts=arr.map(function(v,i){return ((i/(arr.length-1))*W).toFixed(1)+','+(H-6-((v-mn)/rg)*(H-16)).toFixed(1);}).join(' ');
+        return'<polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1.6"/>';
+      }
+      html+='<div style="font-size:12px;font-weight:600;margin:8px 0 2px">成本線 vs 股價 <span style="font-size:10px;color:#c97c0a">■成本</span> <span style="font-size:10px;color:#5F5E5A">■均價</span></div>'+
+        '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'+line(vw,'#5F5E5A')+line(costs,'#c97c0a')+'</svg>';
+    }
+
+    if(r.limitations){
+      html+='<div style="font-size:11px;color:#854F0B;background:#FAEEDA;padding:7px 10px;border-radius:8px;margin-top:8px;line-height:1.7">'+
+        r.limitations.map(function(x){return'• '+x;}).join('<br>')+'</div>';
+    }
+    el.innerHTML=html;
   }catch(e){el.innerHTML='<div style="color:#d63b3b;padding:10px">失敗 '+e+'</div>';}
 }
 
