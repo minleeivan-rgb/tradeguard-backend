@@ -368,3 +368,137 @@ async def stability_batch(user_id: str, source: str = "holdings"):
     scored.sort(key=lambda x: x["score"])
     return {"source": source, "items": scored + [x for x in items if x.get("score") is None],
             "note": "分數低者排前面（最需要放寬停損／縮小部位的標的）"}
+
+# ── 股東人數與級距分布（專屬端點）────────────────────────────────
+
+RETAIL_MAX = 5000          # 5 張以下視為小額
+BIG_MIN    = 400001        # 400 張以上視為大戶
+WHALE_MIN  = 1000001       # 1000 張以上視為千張大戶
+
+
+@router.get("/holders/{ticker}")
+async def holders_detail(ticker: str, weeks: int = 12):
+    """股東人數、平均持股、級距分布與變化（集保週資料）"""
+    try:
+        rows = await _fm("TaiwanStockHoldingSharesPer", ticker, days=weeks * 7 + 20)
+        if not rows:
+            return {"error": "無集保資料"}
+
+        by_date = {}
+        for x in rows:
+            d = x["date"]
+            lvl = str(x.get("HoldingSharesLevel", ""))
+            low = _level_low(lvl)
+            people = float(x.get("people", 0) or 0)
+            shares = float(x.get("unit", 0) or 0)
+            pct = float(x.get("percent", 0) or 0)
+            low_l = lvl.lower()
+            is_total = low_l.startswith("total") or "合計" in lvl or low_l.startswith("all")
+            is_adj = "差異" in lvl or "adjust" in low_l
+            b = by_date.setdefault(d, {"total_people": 0.0, "total_shares": 0.0,
+                                       "sum_people": 0.0, "sum_shares": 0.0,
+                                       "retail_people": 0.0, "big_pct": 0.0,
+                                       "whale_people": 0.0, "whale_pct": 0.0,
+                                       "levels": []})
+            if is_total:
+                b["total_people"] = people
+                b["total_shares"] = shares
+                continue
+            if is_adj:
+                continue
+            b["sum_people"] += people
+            b["sum_shares"] += shares
+            b["levels"].append({"level": lvl, "people": people,
+                                "shares": shares, "pct": round(pct, 2)})
+            if low and low <= RETAIL_MAX:
+                b["retail_people"] += people
+            if low >= BIG_MIN:
+                b["big_pct"] += pct
+            if low >= WHALE_MIN:
+                b["whale_people"] += people
+                b["whale_pct"] += pct
+
+        dates = sorted(by_date)
+        if not dates:
+            return {"error": "資料無法解析"}
+
+        series = []
+        for d in dates[-weeks:]:
+            b = by_date[d]
+            people = b["total_people"] or b["sum_people"]
+            shares = b["total_shares"] or b["sum_shares"]
+            series.append({
+                "date": d,
+                "holders": int(people),
+                "avg_lots_per_holder": round(shares / people / 1000, 2) if people else None,
+                "big_400_pct": round(b["big_pct"], 2),
+                "whale_1000_people": int(b["whale_people"]),
+                "whale_1000_pct": round(b["whale_pct"], 2),
+                "retail_people_pct": round(b["retail_people"] / people * 100, 1) if people else None,
+            })
+
+        latest, first = series[-1], series[0]
+        prev = series[-2] if len(series) > 1 else first
+
+        def _chg(a, b):
+            if a is None or b is None or b == 0:
+                return None
+            return round((a - b) / b * 100, 2)
+
+        holders_wow = _chg(latest["holders"], prev["holders"])
+        holders_period = _chg(latest["holders"], first["holders"])
+        avg_period = _chg(latest["avg_lots_per_holder"], first["avg_lots_per_holder"])
+        big_delta = round(latest["big_400_pct"] - first["big_400_pct"], 2)
+        whale_delta = round(latest["whale_1000_pct"] - first["whale_1000_pct"], 2)
+
+        # 判讀：人數↓ + 平均持股↑ = 集中；人數↑ + 平均持股↓ = 分散
+        if holders_period is not None and avg_period is not None:
+            if holders_period <= -3 and avg_period >= 2:
+                verdict = "籌碼集中中"
+                meaning = (f"{weeks} 週內股東人數減 {abs(holders_period)}%、平均每人持股增 {avg_period}% → "
+                           f"小股東退出、籌碼往大戶集中。這種結構回檔時較有支撐，"
+                           f"停損可依技術位置設定，不需為雜訊放寬。")
+            elif holders_period >= 5 and avg_period <= -2:
+                verdict = "籌碼分散中"
+                meaning = (f"{weeks} 週內股東人數增 {holders_period}%、平均每人持股減 {abs(avg_period)}% → "
+                           f"大量新散戶進場、籌碼變零碎。洗盤幅度會加大，"
+                           f"停損設太緊容易被掃掉，部位要相應縮小。")
+            elif holders_period >= 5 and big_delta < -0.5:
+                verdict = "大戶出貨給散戶"
+                meaning = (f"股東人數增 {holders_period}% 但 400 張以上比重減 {abs(big_delta)}% → "
+                           f"典型派貨結構，上漲會遇到獲利賣壓，追高風險高。")
+            else:
+                verdict = "無明顯方向"
+                meaning = (f"{weeks} 週內人數變化 {holders_period:+}%、平均持股 {avg_period:+}% → "
+                           f"籌碼結構穩定，沒有明顯集中或分散，照既有規則操作即可。")
+        else:
+            verdict, meaning = "資料不足", "期數不足，無法判讀趨勢"
+
+        level_dist = sorted(by_date[dates[-1]]["levels"],
+                            key=lambda x: -x["pct"])[:16]
+
+        return {
+            "ticker": ticker, "name": _name(ticker),
+            "data_date": latest["date"], "weeks_covered": len(series),
+            "holders": latest["holders"],
+            "holders_change_wow_pct": holders_wow,
+            "holders_change_period_pct": holders_period,
+            "avg_lots_per_holder": latest["avg_lots_per_holder"],
+            "avg_lots_change_period_pct": avg_period,
+            "big_400_pct": latest["big_400_pct"], "big_400_delta": big_delta,
+            "whale_1000_people": latest["whale_1000_people"],
+            "whale_1000_pct": latest["whale_1000_pct"], "whale_1000_delta": whale_delta,
+            "retail_people_pct": latest["retail_people_pct"],
+            "verdict": verdict, "what_this_means": meaning,
+            "series": series,
+            "level_distribution": level_dist,
+            "limitations": [
+                "集保股權分散表為週資料（以每週五結算），隔週才公布，你看到的通常是一週前狀態",
+                "人數變化受除權息、增減資、可轉債轉換影響，數字跳動時要先確認有無公司行動",
+                "籌碼集中不等於會漲；流通籌碼少的股票下殺時同樣沒人承接",
+            ],
+            "checked_at": datetime.now(TW_TZ).isoformat(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
