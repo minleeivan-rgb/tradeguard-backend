@@ -423,3 +423,172 @@ async def branch_verify(ticker: str, date: str = ""):
     except Exception as e:
         return {"error": str(e)}
 
+# ── 融資戶平均成本推估 ──────────────────────────────────────────
+
+MARGIN_LOAN_RATIO = 0.60      # 上市股票融資成數（上櫃常為 0.5，實際依標的）
+CALL_LINE = 1.30              # 追繳線 130%
+
+
+@router.get("/margin-cost/{ticker}")
+async def margin_cost(ticker: str, days: int = 180, loan_ratio: float = MARGIN_LOAN_RATIO):
+    """融資戶平均成本推估（移動加權平均法）
+
+    方法：每日融資買進張數以當日 VWAP 計入成本，賣出／現償以當時平均成本扣除。
+    這是「推估」不是公布數據，各家軟體因方法不同會有差異。
+    """
+    try:
+        start = (datetime.now(TW_TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
+        end   = datetime.now(TW_TZ).strftime("%Y-%m-%d")
+
+        mrows = await _fm("TaiwanStockMarginPurchaseShortSale", start, end, ticker)
+        prows = await _fm("TaiwanStockPrice", start, end, ticker)
+        if not mrows or not prows:
+            return {"error": "融資或股價資料不足"}
+
+        px = {}
+        for r in prows:
+            vol = float(r.get("Trading_Volume", 0) or 0)
+            money = float(r.get("Trading_money", 0) or 0)
+            close = float(r.get("close", 0) or 0)
+            hi, lo = float(r.get("max", 0) or 0), float(r.get("min", 0) or 0)
+            vwap = money / vol if vol > 0 and money > 0 else \
+                   ((hi + lo + close) / 3 if close > 0 else close)
+            if vwap > 0:
+                px[r["date"]] = {"vwap": round(vwap, 2), "close": close}
+
+        mrows.sort(key=lambda x: x["date"])
+        mrows = [r for r in mrows if r["date"] in px]
+        if len(mrows) < 20:
+            return {"error": f"可用交易日僅 {len(mrows)} 天，樣本不足"}
+
+        def g(r, k):
+            try:
+                return float(r.get(k, 0) or 0)
+            except Exception:
+                return 0.0
+
+        # 恆等式驗證（順便確認單位一致）
+        idbad = 0
+        for r in mrows:
+            lhs = g(r, "MarginPurchaseTodayBalance")
+            rhs = (g(r, "MarginPurchaseYesterdayBalance") + g(r, "MarginPurchaseBuy")
+                   - g(r, "MarginPurchaseSell") - g(r, "MarginPurchaseCashRepayment"))
+            if abs(lhs - rhs) > 1:
+                idbad += 1
+
+        first = mrows[0]
+        balance = g(first, "MarginPurchaseYesterdayBalance") or g(first, "MarginPurchaseTodayBalance")
+        cost = px[first["date"]]["vwap"]          # 初始成本假設＝區間首日均價
+        init_balance = balance
+        cum_buy = 0.0
+        history = []
+
+        for r in mrows:
+            d = r["date"]
+            v = px[d]["vwap"]
+            buy  = g(r, "MarginPurchaseBuy")
+            out  = g(r, "MarginPurchaseSell") + g(r, "MarginPurchaseCashRepayment")
+            if buy > 0:
+                total = balance + buy
+                cost = (balance * cost + buy * v) / total if total > 0 else v
+                balance = total
+                cum_buy += buy
+            if out > 0:
+                balance = max(0.0, balance - out)     # 賣出以平均成本出場，成本不變
+            history.append({"date": d, "balance_lots": round(balance),
+                            "avg_cost": round(cost, 2), "vwap": v})
+
+        latest = mrows[-1]
+        cur_balance = g(latest, "MarginPurchaseTodayBalance")
+        avg_cost = round(cost, 2)
+
+        # 現價
+        cur_price = None
+        try:
+            from services.yfinance_service import get_tw_realtime_price
+            rt = await get_tw_realtime_price(ticker)
+            if rt and rt.get("current_price"):
+                cur_price = float(rt["current_price"])
+        except Exception:
+            pass
+        if not cur_price:
+            cur_price = px[latest["date"]]["close"]
+
+        pnl_pct = round((cur_price - avg_cost) / avg_cost * 100, 2) if avg_cost else None
+        call_price = round(avg_cost * loan_ratio * CALL_LINE, 2)
+        to_call_pct = round((call_price - cur_price) / cur_price * 100, 2) if cur_price else None
+        maint = round(cur_price / (avg_cost * loan_ratio) * 100, 1) if avg_cost else None
+
+        # 區間內買進量佔目前餘額比例 → 初始假設被沖淡的程度
+        coverage = round(cum_buy / cur_balance, 2) if cur_balance > 0 else None
+        if coverage is None:
+            reliability = "無法評估"
+        elif coverage >= 3:
+            reliability = "高（區間內換手充分，初始假設影響已極小）"
+        elif coverage >= 1.5:
+            reliability = "中（初始假設影響有限）"
+        else:
+            reliability = "低（區間內換手不足，結果受初始假設影響大，建議拉長 days）"
+
+        if pnl_pct is None:
+            meaning = "資料不足"
+        elif pnl_pct <= -15:
+            meaning = (f"融資戶平均套牢 {abs(pnl_pct)}%（成本約 ${avg_cost}）→ "
+                       f"反彈到成本區附近會遇到大量解套賣壓，那裡是壓力不是目標；"
+                       f"且平均維持率僅 {maint}%，再跌容易出現斷頭賣壓加速下殺。")
+        elif pnl_pct < -3:
+            meaning = (f"融資戶小幅套牢 {abs(pnl_pct)}%（成本約 ${avg_cost}）→ "
+                       f"${avg_cost} 是短線壓力區，站上並站穩才算解套換手完成。")
+        elif pnl_pct <= 5:
+            meaning = (f"現價貼近融資成本 ${avg_cost} → 這是融資戶的多空分界，"
+                       f"跌破容易觸發停損與追繳的連鎖賣壓，是關鍵防守位。")
+        elif pnl_pct <= 20:
+            meaning = (f"融資戶平均獲利 {pnl_pct}%（成本約 ${avg_cost}）→ "
+                       f"有獲利墊底，短線賣壓較輕；${avg_cost} 可視為回檔的第一支撐參考。")
+        else:
+            meaning = (f"融資戶平均獲利 {pnl_pct}%（成本約 ${avg_cost}）→ "
+                       f"獲利豐厚代表隨時可能了結，若出現爆量長黑要留意集體出場；"
+                       f"追繳價 ${call_price} 距現價很遠，短期無斷頭風險。")
+
+        return {
+            "ticker": ticker, "name": _name_of(ticker),
+            "data_date": latest["date"],
+            "current_price": cur_price,
+            "avg_cost_est": avg_cost,
+            "margin_holder_pnl_pct": pnl_pct,
+            "balance_lots": round(cur_balance),
+            "balance_change_5d_lots": round(cur_balance - g(mrows[-6], "MarginPurchaseTodayBalance"))
+                                      if len(mrows) >= 6 else None,
+            "assumed_loan_ratio": loan_ratio,
+            "call_price_est": call_price,
+            "distance_to_call_pct": to_call_pct,
+            "avg_maintenance_pct": maint,
+            "what_this_means": meaning,
+            "reliability": reliability,
+            "in_window_buy_over_balance": coverage,
+            "window_days": len(mrows),
+            "window": f'{mrows[0]["date"]} ~ {latest["date"]}',
+            "identity_check": {"rows": len(mrows), "mismatch": idbad,
+                               "formula": "今日餘額 = 昨日餘額 + 融資買 - 融資賣 - 現金償還",
+                               "verdict": "PASS" if idbad == 0 else f"有 {idbad} 日不符"},
+            "history": history[-40:],
+            "limitations": [
+                "融資戶成本無官方公布，此為推估值；不同軟體因演算法不同會有差異",
+                f"初始成本以區間首日均價假設（區間內買進量為目前餘額的 {coverage} 倍）",
+                "融資成數以 " + str(int(loan_ratio * 100)) + "% 計，實際依標的與券商而異；"
+                "追繳價為對應之估算值",
+                "現金償還不經市場賣出，會使餘額下降但無實際賣壓",
+            ],
+            "checked_at": datetime.now(TW_TZ).isoformat(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _name_of(t: str) -> str:
+    try:
+        from routers.scan import TW_STOCK_LIST
+        return TW_STOCK_LIST.get(t, t)
+    except Exception:
+        return t
+
