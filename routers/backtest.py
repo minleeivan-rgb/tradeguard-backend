@@ -39,7 +39,24 @@ async def _frames(max_days: int = 400):
     return close, vol, use
 
 
+_NAME_MAP: dict = {}
+
+
+async def _ensure_names():
+    global _NAME_MAP
+    try:
+        from services.finmind import get_tw_name_map
+        m = await get_tw_name_map()
+        if m:
+            _NAME_MAP = m
+    except Exception:
+        pass
+
+
 def _name(t: str) -> str:
+    t = str(t)
+    if _NAME_MAP.get(t):
+        return _NAME_MAP[t]
     try:
         from routers.scan import TW_STOCK_LIST
         return TW_STOCK_LIST.get(t, t)
@@ -94,6 +111,7 @@ async def status():
 @router.get("/entry")
 async def backtest_entry(strategy: str = "vol_quiet", max_per_day: int = 20):
     """進場訊號驗證：訊號日 T 收盤觸發 → T+1 收盤買進 → 持有 N 日"""
+    await _ensure_names()
     close, vol, dates = await _frames()
     if close is None:
         return {"error": f"歷史資料不足（{len(dates)} 天），請先執行 /signals/backfill"}
