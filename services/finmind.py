@@ -30,6 +30,43 @@ async def fm_get(dataset: str, stock_id: str, start_date: str = None, end_date: 
     return data.get("data", [])
 
 
+_name_map_cache: dict = {"map": None, "fetched_at": 0.0}
+
+
+async def get_tw_name_map() -> dict:
+    """全台股代號→中文名稱對照表（上市/上櫃/興櫃，約 2000+ 檔，6 小時快取）"""
+    global _name_map_cache, _stock_info_cache
+    now = time.time()
+    if _name_map_cache["map"] and (now - _name_map_cache["fetched_at"]) <= _STOCK_INFO_TTL:
+        return _name_map_cache["map"]
+    try:
+        if _stock_info_cache["data"] is None or (now - _stock_info_cache["fetched_at"]) > _STOCK_INFO_TTL:
+            params = {"dataset": "TaiwanStockInfo", "token": FINMIND_TOKEN}
+            async with httpx.AsyncClient(timeout=25) as client:
+                r = await client.get(FINMIND_BASE, params=params)
+            _stock_info_cache["data"] = r.json().get("data", [])
+            _stock_info_cache["fetched_at"] = now
+        m = {}
+        for s in _stock_info_cache["data"] or []:
+            sid = str(s.get("stock_id", "")).strip()
+            nm = str(s.get("stock_name", "")).strip()
+            if sid and nm and sid not in m:
+                m[sid] = nm
+        # 併入內建表（內建優先度低，僅補 FinMind 沒有的）
+        try:
+            from routers.scan import TW_STOCK_LIST
+            for k, v in TW_STOCK_LIST.items():
+                m.setdefault(k, v)
+        except Exception:
+            pass
+        if m:
+            _name_map_cache = {"map": m, "fetched_at": now}
+        return m
+    except Exception as e:
+        print(f"[FinMind] name map error: {e}")
+        return _name_map_cache["map"] or {}
+
+
 async def get_tw_stock_name(ticker: str) -> str | None:
     """由 TaiwanStockInfo 精確取得中文名稱（共用 6 小時快取）"""
     global _stock_info_cache
