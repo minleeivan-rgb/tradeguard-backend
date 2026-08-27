@@ -149,7 +149,8 @@ async def branch_chips(ticker: str, days: int = 5):
             top15 = sum(x["today_lots"] for x in top_buy[:15]) * 1000
             conc = round(top15 / total_buy_today * 100, 1)
 
-        return {"ticker": ticker, "date": latest, "window_dates": dates,
+        return {"ticker": ticker, "name": await _name_of_async(ticker),
+                "date": latest, "window_dates": dates,
                 "top_buy": top_buy, "top_sell": top_sell,
                 "streak_buyers": streak_list[:10],
                 "buy_concentration_pct": conc,
@@ -551,7 +552,7 @@ async def margin_cost(ticker: str, days: int = 180, loan_ratio: float = MARGIN_L
                        f"追繳價 ${call_price} 距現價很遠，短期無斷頭風險。")
 
         return {
-            "ticker": ticker, "name": _name_of(ticker),
+            "ticker": ticker, "name": await _name_of_async(ticker),
             "data_date": latest["date"],
             "current_price": cur_price,
             "avg_cost_est": avg_cost,
@@ -583,6 +584,17 @@ async def margin_cost(ticker: str, days: int = 180, loan_ratio: float = MARGIN_L
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+async def _name_of_async(t: str) -> str:
+    try:
+        from services.finmind import get_tw_name_map
+        m = await get_tw_name_map()
+        if m.get(str(t)):
+            return m[str(t)]
+    except Exception:
+        pass
+    return _name_of(t)
 
 
 def _name_of(t: str) -> str:
