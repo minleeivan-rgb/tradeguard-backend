@@ -16,12 +16,42 @@ FINMIND_TOKEN = os.getenv("FINMIND_TOKEN", "")
 FINMIND_BASE  = "https://api.finmindtrade.com/api/v4/data"
 TW_TZ = timezone(timedelta(hours=8))
 
+_NAME_MAP: dict = {}
+
+
 def _name(ticker: str) -> str:
+    """同步版：先查已載入的全市場對照表，再退回內建表"""
+    t = str(ticker)
+    if _NAME_MAP.get(t):
+        return _NAME_MAP[t]
     try:
         from routers.scan import TW_STOCK_LIST
-        return TW_STOCK_LIST.get(ticker, ticker)
+        return TW_STOCK_LIST.get(t, t)
     except Exception:
-        return ticker
+        return t
+
+
+async def _ensure_names():
+    """載入全台股名稱對照表到模組快取（FinMind TaiwanStockInfo，6小時快取）"""
+    global _NAME_MAP
+    try:
+        from services.finmind import get_tw_name_map
+        m = await get_tw_name_map()
+        if m:
+            _NAME_MAP = m
+    except Exception as e:
+        print(f"[signals] name map: {e}")
+
+
+def _fill_names(items: list) -> list:
+    """把清單裡的 name 欄位補成中文（含 leader_name）"""
+    for x in items or []:
+        if isinstance(x, dict):
+            if x.get("ticker"):
+                x["name"] = _name(x["ticker"])
+            if x.get("leader"):
+                x["leader_name"] = _name(x["leader"])
+    return items
 
 async def _load_frames(days: int = 70):
     """回傳 (close_df, vol_df) columns=ticker index=date(sorted str)"""
@@ -47,6 +77,7 @@ def _pct(a, b):
         return 0.0
 
 async def scan_early() -> dict:
+    await _ensure_names()
     close, vol, dates = await _load_frames(70)
     if close is None:
         return {"error": f"歷史資料不足（目前 {len(dates)} 天，需先執行回補）", "data_date": dates[-1] if dates else ""}
@@ -103,8 +134,11 @@ async def scan_early() -> dict:
     laggards = await scan_laggards(close)
 
     return {"data_date": latest,
-            "vol_quiet": vol_quiet[:15], "squeeze": squeeze[:15],
-            "high60": high60[:15], "trust": trust[:15], "laggards": laggards[:12]}
+            "vol_quiet": _fill_names(vol_quiet[:15]),
+            "squeeze": _fill_names(squeeze[:15]),
+            "high60": _fill_names(high60[:15]),
+            "trust": _fill_names(trust[:15]),
+            "laggards": _fill_names(laggards[:12])}
 
 async def _scan_trust_streak(close: pd.DataFrame) -> list:
     chip_dates = await db.market_chips.distinct("date")
@@ -141,6 +175,7 @@ async def _scan_trust_streak(close: pd.DataFrame) -> list:
     return out
 
 async def scan_laggards(close: pd.DataFrame = None) -> list:
+    await _ensure_names()
     if close is None:
         close, _, _ = await _load_frames(40)
         if close is None:
@@ -213,6 +248,7 @@ async def adl_status() -> dict:
 
 async def revenue_momentum(tickers: list) -> list:
     """月營收動能：YoY 連續擴大或創高（逐檔查 FinMind）"""
+    await _ensure_names()
     start = (datetime.now(TW_TZ) - timedelta(days=460)).strftime("%Y-%m-%d")
     out = []
     async with httpx.AsyncClient(timeout=15) as c:
@@ -249,6 +285,7 @@ async def revenue_momentum(tickers: list) -> list:
 
 async def holders_ratio(ticker: str) -> dict:
     """大戶（400張以上）持股比率近 4 週變化"""
+    await _ensure_names()
     start = (datetime.now(TW_TZ) - timedelta(days=70)).strftime("%Y-%m-%d")
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.get(FINMIND_BASE, params={
