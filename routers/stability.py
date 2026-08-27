@@ -29,7 +29,24 @@ FM = "https://api.finmindtrade.com/api/v4/data"
 TW_TZ = timezone(timedelta(hours=8))
 
 
+_NAME_MAP: dict = {}
+
+
+async def _ensure_names():
+    global _NAME_MAP
+    try:
+        from services.finmind import get_tw_name_map
+        m = await get_tw_name_map()
+        if m:
+            _NAME_MAP = m
+    except Exception:
+        pass
+
+
 def _name(t: str) -> str:
+    t = str(t)
+    if _NAME_MAP.get(t):
+        return _NAME_MAP[t]
     try:
         from routers.scan import TW_STOCK_LIST
         return TW_STOCK_LIST.get(t, t)
@@ -269,6 +286,7 @@ def _score_branch(d: dict):
 
 @router.get("/{ticker}")
 async def stability(ticker: str):
+    await _ensure_names()
     big, dt, mg, br = await asyncio.gather(
         _big_holders(ticker), _day_trading(ticker),
         _margin_usage(ticker), _branch_conc(ticker),
@@ -380,6 +398,7 @@ WHALE_MIN  = 1000001       # 1000 張以上視為千張大戶
 async def holders_detail(ticker: str, weeks: int = 12):
     """股東人數、平均持股、級距分布與變化（集保週資料）"""
     try:
+        await _ensure_names()
         rows = await _fm("TaiwanStockHoldingSharesPer", ticker, days=weeks * 7 + 20)
         if not rows:
             return {"error": "無集保資料"}
