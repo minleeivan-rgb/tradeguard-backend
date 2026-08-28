@@ -39,6 +39,23 @@ async def _frames(max_days: int = 400):
     return close, vol, use
 
 
+LIMIT_MOVE = 0.11      # 台股單日漲跌幅上限 10%，超過視為除權息/減資等公司行動
+
+
+def _corp_action_cum(close: pd.DataFrame):
+    """回傳累積計數表：用來 O(1) 判斷某段期間內是否發生公司行動（未還原股價跳空）"""
+    bad = close.pct_change().abs() > LIMIT_MOVE
+    return bad.cumsum(), int(bad.values.sum())
+
+
+def _has_corp_action(cum, a: int, b: int, ticker: str) -> bool:
+    """(a, b] 區間內該股是否有公司行動"""
+    try:
+        return bool(cum.iloc[b].get(ticker, 0) - cum.iloc[a].get(ticker, 0) > 0)
+    except Exception:
+        return False
+
+
 _NAME_MAP: dict = {}
 
 
@@ -120,7 +137,9 @@ async def backtest_entry(strategy: str = "vol_quiet", max_per_day: int = 20):
 
     n = len(close)
     max_h = max(HORIZONS)
+    cum, total_bad = _corp_action_cum(close)
     trades = []
+    excluded = 0
     for i in range(21, n - max_h - 1):
         mask = _signal_mask(strategy, close, vol, i)
         if mask is None or not mask.any():
@@ -131,16 +150,27 @@ async def backtest_entry(strategy: str = "vol_quiet", max_per_day: int = 20):
             ep = close.iloc[entry_i].get(t)
             if not ep or pd.isna(ep) or ep <= 0:
                 continue
+            # 進場當日本身若為公司行動跳空，該筆不採用
+            if _has_corp_action(cum, entry_i - 1, entry_i, t):
+                excluded += 1
+                continue
             rec = {"signal_date": close.index[i], "entry_date": close.index[entry_i],
                    "ticker": t, "entry": round(float(ep), 2)}
+            skipped_any = False
             for hz in HORIZONS:
                 xi = entry_i + hz
                 if xi >= n:
+                    continue
+                if _has_corp_action(cum, entry_i, xi, t):
+                    skipped_any = True          # 持有期間除權息/減資，報酬失真，不列入
                     continue
                 xp = close.iloc[xi].get(t)
                 if xp and not pd.isna(xp):
                     gross = (float(xp) / float(ep) - 1) * 100
                     rec[f"d{hz}"] = round(gross - ROUND_TRIP_COST * 100, 2)
+            if skipped_any and not any(f"d{h}" in rec for h in HORIZONS):
+                excluded += 1
+                continue
             trades.append(rec)
 
     if not trades:
@@ -160,6 +190,8 @@ async def backtest_entry(strategy: str = "vol_quiet", max_per_day: int = 20):
     out = {"strategy": strategy, "trades": len(trades),
            "period": f"{close.index[0]} ~ {close.index[-1]}",
            "days_tested": n, "cost_assumption_pct": round(ROUND_TRIP_COST * 100, 3),
+           "excluded_corporate_actions": excluded,
+           "corp_action_days_in_data": total_bad,
            "results": {}, "baseline_market_avg": baseline}
 
     for hz in HORIZONS:
@@ -186,12 +218,16 @@ async def backtest_entry(strategy: str = "vol_quiet", max_per_day: int = 20):
                         else "劣於大盤"),
         }
 
-    best = sorted(trades, key=lambda x: -(x.get("d10") or -99))[:5]
-    worst = sorted(trades, key=lambda x: (x.get("d10") or 99))[:5]
-    out["sample_best"] = [{**b, "name": _name(b["ticker"])} for b in best]
+    with_d10 = [t for t in trades if t.get("d10") is not None]
+    best  = sorted(with_d10, key=lambda x: -x["d10"])[:8]
+    worst = sorted(with_d10, key=lambda x: x["d10"])[:8]
+    recent = sorted(trades, key=lambda x: x["signal_date"], reverse=True)[:20]
+    out["sample_best"]  = [{**b, "name": _name(b["ticker"])} for b in best]
     out["sample_worst"] = [{**b, "name": _name(b["ticker"])} for b in worst]
+    out["recent_signals"] = [{**b, "name": _name(b["ticker"])} for b in recent]
     out["warning"] = ("回測結果不保證未來表現。樣本期間偏短時，結果易受單一行情主導；"
-                      "edge 小於 1% 者實務上會被滑價吃掉。")
+                      "edge 小於 1% 者實務上會被滑價吃掉。"
+                      "已排除單日漲跌超過 11% 的公司行動（除權息／減資）造成的失真。")
     return out
 
 
@@ -206,7 +242,9 @@ async def backtest_exit(strategy: str = "high60", trailing_pct: float = 20,
 
     n = len(close)
     ma20_all = close.rolling(20).mean()
+    cum, _total_bad = _corp_action_cum(close)
     entries = []
+    excluded = 0
     for i in range(21, n - 10):
         mask = _signal_mask(strategy, close, vol, i)
         if mask is None or not mask.any():
@@ -214,6 +252,9 @@ async def backtest_exit(strategy: str = "high60", trailing_pct: float = 20,
         for t in list(close.columns[mask])[:max_per_day]:
             ep = close.iloc[i + 1].get(t)
             if ep and not pd.isna(ep) and ep > 0:
+                if _has_corp_action(cum, i, i + 1, t):
+                    excluded += 1
+                    continue
                 entries.append((i + 1, t, float(ep)))
 
     if not entries:
@@ -226,64 +267,90 @@ async def backtest_exit(strategy: str = "high60", trailing_pct: float = 20,
     }
     results = {}
     for label, kind in rules.items():
-        rets, holds = [], []
+        rets, holds, detail = [], [], []
         for ei, t, ep in entries:
             peak = ep
-            exit_p, held = None, 0
+            exit_p, held, exit_i = None, 0, None
+            corp = False
             for j in range(ei + 1, min(ei + 1 + max_hold, n)):
                 px = close.iloc[j].get(t)
                 if px is None or pd.isna(px):
                     continue
+                if _has_corp_action(cum, j - 1, j, t):
+                    corp = True          # 持有期間除權息／減資，該筆不計
+                    break
                 px = float(px)
                 held = j - ei
                 peak = max(peak, px)
                 if kind == "trailing":
                     if (px - ep) / ep * 100 <= -stoploss_pct:
-                        exit_p = px; break
+                        exit_p, exit_i = px, j; break
                     if px > ep and (peak - px) / peak * 100 >= trailing_pct:
-                        exit_p = px; break
+                        exit_p, exit_i = px, j; break
                 elif kind == "ma20":
                     m = ma20_all.iloc[j].get(t)
                     if m and not pd.isna(m) and px < float(m):
-                        exit_p = px; break
+                        exit_p, exit_i = px, j; break
                 elif kind == "hold20":
                     if held >= 20:
-                        exit_p = px; break
+                        exit_p, exit_i = px, j; break
+            if corp:
+                continue
             if exit_p is None:
                 last_i = min(ei + max_hold, n - 1)
                 px = close.iloc[last_i].get(t)
                 if px is None or pd.isna(px):
                     continue
-                exit_p, held = float(px), last_i - ei
-            rets.append((exit_p / ep - 1) * 100 - ROUND_TRIP_COST * 100)
+                exit_p, held, exit_i = float(px), last_i - ei, last_i
+            r = (exit_p / ep - 1) * 100 - ROUND_TRIP_COST * 100
+            rets.append(r)
             holds.append(held)
+            detail.append({"entry_date": close.index[ei], "ticker": t,
+                           "name": _name(t), "entry": round(ep, 2),
+                           "exit_date": close.index[exit_i], "exit": round(exit_p, 2),
+                           "hold_days": held, "return_pct": round(r, 2)})
 
         if len(rets) < 5:
             results[label] = {"n": len(rets), "note": "樣本不足"}
             continue
         s = pd.Series(rets)
         wins = s[s > 0]
-        # 簡易最大回撤（等權序列累積）
-        eq = (1 + s / 100).cumprod()
-        dd = round(float(((eq - eq.cummax()) / eq.cummax()).min() * 100), 2)
+
+        # 最大回撤：以「訊號日等權買進當日全部候選」建構日期序列權益曲線
+        by_date = {}
+        for d in detail:
+            by_date.setdefault(d["entry_date"], []).append(d["return_pct"])
+        period_rets = [sum(v) / len(v) for _, v in sorted(by_date.items())]
+        eq = (1 + pd.Series(period_rets) / 100).cumprod()
+        dd = round(float(((eq - eq.cummax()) / eq.cummax()).min() * 100), 2) if len(eq) else None
+
+        detail.sort(key=lambda x: x["return_pct"])
         results[label] = {
             "n": len(rets),
             "win_rate_pct": round(len(wins) / len(s) * 100, 1),
             "avg_return_pct": round(s.mean(), 2),
-            "total_return_pct": round((eq.iloc[-1] - 1) * 100, 2),
+            "median_return_pct": round(s.median(), 2),
             "avg_hold_days": round(sum(holds) / len(holds), 1),
             "worst_trade_pct": round(s.min(), 2),
+            "best_trade_pct": round(s.max(), 2),
             "max_drawdown_pct": dd,
+            "periods": len(period_rets),
+            "sample_worst": detail[:5],
+            "sample_best": list(reversed(detail[-5:])),
         }
 
     valid = {k: v for k, v in results.items() if "avg_return_pct" in v}
     best = max(valid, key=lambda k: valid[k]["avg_return_pct"]) if valid else None
     return {
         "strategy": strategy, "entries": len(entries),
+        "excluded_corporate_actions": excluded,
         "period": f"{close.index[0]} ~ {close.index[-1]}",
         "params": {"trailing_pct": trailing_pct, "stoploss_pct": stoploss_pct,
                    "max_hold_days": max_hold},
         "results": results, "best_by_avg_return": best,
+        "drawdown_note": "最大回撤以「每個訊號日等權買進當日全部候選」的日期序列權益曲線計算，"
+                         "非單筆連續全押",
         "warning": "出場規則的優劣高度取決於樣本期間的行情型態（多頭/震盪/空頭），"
-                   "單一期間的結論不可外推；建議累積更多歷史後重跑。",
+                   "單一期間的結論不可外推；建議累積更多歷史後重跑。"
+                   "已排除除權息／減資造成的價格跳空。",
     }
